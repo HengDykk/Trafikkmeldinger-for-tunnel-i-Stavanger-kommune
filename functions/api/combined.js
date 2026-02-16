@@ -109,10 +109,26 @@ export async function onRequest(context) {
       return true;
     }
 
-    const stavangerOnly = messagesClean.filter(isStavanger);
+    function isActiveNow(m) {
+      const now = Date.now();
+      const validityStatus = String(m.validityStatus || "").toLowerCase();
+      if (["suspended", "inactive", "closed", "cancelled", "cancelledbyoperator"].includes(validityStatus)) {
+        return false;
+      }
+
+      const startMs = m.overallStartTime ? Date.parse(m.overallStartTime) : NaN;
+      const endMs = m.overallEndTime ? Date.parse(m.overallEndTime) : NaN;
+
+      if (!Number.isNaN(startMs) && now < startMs) return false;
+      if (!Number.isNaN(endMs) && now > endMs) return false;
+      return true;
+    }
+
+    const activeMessages = messagesClean.filter(isActiveNow);
+    const stavangerOnly = activeMessages.filter(isStavanger);
 
     // Fallback hvis tomt, ellers begrens til 25
-    const localOnly = stavangerOnly.length ? stavangerOnly.slice(0, 25) : messagesClean.slice(0, 25);
+    const localOnly = stavangerOnly.length ? stavangerOnly.slice(0, 25) : activeMessages.slice(0, 25);
 
     const nowIso = new Date().toISOString();
 
@@ -355,8 +371,16 @@ function extractMessagesFromDatex(xml) {
 
     const severity = pick(r, "severity") || pick(r, "impactOnTraffic") || "INFO";
     const created = pick(r, "situationRecordCreationTime") || pick(r, "versionTime") || "";
+    const versionTime = pick(r, "situationRecordVersionTime") || "";
+    const validityStatus = pick(r, "validityStatus") || "";
+    const overallStartTime = pick(r, "overallStartTime") || "";
+    const overallEndTime = pick(r, "overallEndTime") || "";
+    const trafficConstrictionType = pick(r, "trafficConstrictionType") || "";
+    const roadManagementType = pick(r, "roadOrCarriagewayOrLaneManagementType") || "";
 
     const where = buildWhere(r);
+    const typeMatch = r.match(/<[^:>]*:?situationRecord\b[^>]*\bxsi:type="[^:"]*:([^"]+)"/i);
+    const recordType = typeMatch ? typeMatch[1] : "";
 
     const title = text ? text.split(".")[0].slice(0, 90) : "Trafikkmelding";
 
@@ -368,6 +392,13 @@ function extractMessagesFromDatex(xml) {
       where,
       severity: severity || "INFO",
       time: created,
+      versionTime,
+      validityStatus,
+      overallStartTime,
+      overallEndTime,
+      trafficConstrictionType,
+      roadManagementType,
+      recordType,
     });
 
     if (messages.length >= 80) break;

@@ -18,7 +18,7 @@
   const TUNNELS = {
     byfjord: { name: "Byfjordtunnelen", keywords: ["byfjord"], length: 5875 },
     mastrafjord: { name: "Mastrafjordtunnelen", keywords: ["mastrafjord", "mastra"], length: 4424 },
-    eiganes: { name: "Eiganestunnelen", keywords: ["eiganes"], length: 3174 },
+    eiganes: { name: "Eiganestunnelen", keywords: ["eiganestunnelen", "eiganes tunnelen", "eiganes"], length: 3174 },
     hundvag: { name: "Hundvågtunnelen", keywords: ["hundvåg", "hundvaag"], length: 2100 },
     ryfast: { name: "Ryfylketunnelen", keywords: ["ryfast", "ryfylke"], length: 14300 },
     sotra: { name: "Sotrasambandet", keywords: ["sotra", "sotrasambandet"], length: 0 },
@@ -117,12 +117,55 @@
     const tunnel = TUNNELS[tunnelKey];
     if (!tunnel) return false;
     const text = `${message.title || ""} ${message.text || ""} ${message.where || ""}`.toLowerCase();
-    return tunnel.keywords.some(keyword => text.includes(keyword));
+    const keywordHit = tunnel.keywords.some(keyword => text.includes(keyword));
+    if (!keywordHit) return false;
+
+    // Avoid false positives for area names (e.g. "Eiganes") when the event is not tunnel-specific.
+    if (tunnelKey === "eiganes" && text.includes("eiganes") && !text.includes("eiganestunnelen")) {
+      const hasTunnelWord = /tunnel|tunell/.test(text);
+      if (!hasTunnelWord) return false;
+    }
+
+    return true;
+  }
+
+  function isMessageActiveNow(message) {
+    const validityStatus = String(message.validityStatus || "").toLowerCase();
+    if (["suspended", "inactive", "closed", "cancelled", "cancelledbyoperator"].includes(validityStatus)) {
+      return false;
+    }
+
+    const now = Date.now();
+    const startMs = message.overallStartTime ? Date.parse(message.overallStartTime) : NaN;
+    const endMs = message.overallEndTime ? Date.parse(message.overallEndTime) : NaN;
+
+    if (!Number.isNaN(startMs) && now < startMs) return false;
+    if (!Number.isNaN(endMs) && now > endMs) return false;
+    return true;
   }
 
   function determineTunnelStatus(messages, tunnelKey) {
-    const relevantMessages = messages.filter(msg => isRelevantToTunnel(msg, tunnelKey));
+    const relevantMessages = messages
+      .filter(msg => isRelevantToTunnel(msg, tunnelKey))
+      .filter(msg => isMessageActiveNow(msg))
+      .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
     if (relevantMessages.length === 0) return "ÅPEN";
+
+    // If latest relevant message explicitly says the situation is resolved/open, treat tunnel as open.
+    const latestText = `${relevantMessages[0].title || ""} ${relevantMessages[0].text || ""}`.toLowerCase();
+    if (/åpen igjen|åpnet|åpen for trafikk|normal trafikk|ferdig ryddet|gjenåpnet|reopened/.test(latestText)) {
+      return "ÅPEN";
+    }
+
+    // DATEX 3.1 structured fields should be the primary source for status.
+    for (const msg of relevantMessages) {
+      const constriction = String(msg.trafficConstrictionType || "").toLowerCase();
+      const management = String(msg.roadManagementType || "").toLowerCase();
+      if (["roadblocked", "carriagewayblocked", "lanesblocked"].includes(constriction)) return "STENGT";
+      if (["roadpartiallyobstructed", "carriagewaypartiallyobstructed", "lanespartiallyobstructed"].includes(constriction)) return "AVVIK";
+      if (/(roadclosed|carriagewayclosed|lanesclosed|tunnelclosed|closed)/.test(management)) return "STENGT";
+      if (/(alternatingcontraflow|intermittentclosures|contraflow|laneclosure)/.test(management)) return "AVVIK";
+    }
     
     // Check severity first (most reliable indicator)
     for (const msg of relevantMessages) {
