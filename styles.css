@@ -321,3 +321,55 @@ body {
 @media (max-width: 900px) {
   .tunnelsGrid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Mobile (iPhone 15 Pro: 393px) */
+@media (max-width: 500px) {
+  html, body { overflow: auto; height: auto; }
+  .app {
+    height: auto;
+    min-height: 100vh;
+    padding: 10px;
+    gap: 10px;
+  }
+  .top {
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    align-items: flex-start;
+  }
+  .brandText .title { font-size: 20px; }
+  .brandText .sub { font-size: 13px; }
+  .meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .chip { font-size: 13px; padding: 6px 10px; }
+  .mainGrid {
+    grid-template-columns: 1fr;
+    flex: none;
+  }
+  .h2 { font-size: 22px; }
+  .cardHeader { padding: 14px 16px; }
+  .tunnelsGrid {
+    grid-template-columns: 1fr;
+    padding: 10px;
+    gap: 10px;
+  }
+  .tunnelItem { padding: 14px; }
+  .tunnelItemName { font-size: 18px; }
+  .tunnelItemReason { font-size: 13px; }
+  .items { padding: 10px; }
+  .item { padding: 12px; }
+  .itemTitle { font-size: 15px; }
+  .itemText { font-size: 13px; }
+  .foot {
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px;
+    text-align: center;
+  }
+  .footLeft, .footRight {
+    flex-direction: column;
+    gap: 6px;
+  }
+}
