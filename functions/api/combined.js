@@ -141,6 +141,18 @@ export async function onRequest(context) {
 
   const cached = await cache.match(cacheKey);
 
+  if (!user || !pass) {
+    return json(
+      {
+        updated: new Date().toISOString(),
+        error: "Missing DATEX credentials",
+        message:
+          "DATEX_USER and DATEX_PASS must be set in Cloudflare Pages environment variables.",
+      },
+      503
+    );
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
