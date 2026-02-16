@@ -10,7 +10,9 @@
     clockRate: 1000,
     weatherRefreshRate: 600000,
     retryDelay: 5000,
-    maxRetries: 3
+    maxRetries: 3,
+    apiTimeoutMs: 10000,
+    offlineCacheKey: "byfjord:lastPayload"
   };
 
   const TUNNELS = {
@@ -29,7 +31,9 @@
     lastSuccessfulUpdate: null,
     isRefreshing: false,
     tunnelStatuses: {},
-    allMessages: []
+    allMessages: [],
+    messagesByTunnel: {},
+    scheduledRetryId: null
   };
 
   const dom = {
@@ -45,6 +49,23 @@
   };
 
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
+
+  function readOfflineCache() {
+    try {
+      const raw = localStorage.getItem(CONFIG.offlineCacheKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeOfflineCache(payload) {
+    try {
+      localStorage.setItem(CONFIG.offlineCacheKey, JSON.stringify(payload));
+    } catch {
+      // Ignore cache write failures (private mode/quota)
+    }
+  }
 
   function updateGlobalTheme() {
     if (!dom.app) return;
@@ -134,6 +155,14 @@
     return "ÅPEN";
   }
 
+  function rebuildTunnelMessageIndex(messages) {
+    const next = {};
+    for (const tunnelKey of Object.keys(TUNNELS)) {
+      next[tunnelKey] = messages.filter((msg) => isRelevantToTunnel(msg, tunnelKey));
+    }
+    STATE.messagesByTunnel = next;
+  }
+
   function renderTunnelsGrid() {
     if (!dom.tunnelsGrid) return;
     
@@ -147,7 +176,7 @@
         status === "ÅPEN" ? "Åpen" :
         status === "STENGT" ? "Stengt" : "Avvik";
       
-      const tunnelMessages = STATE.allMessages.filter(msg => isRelevantToTunnel(msg, key));
+      const tunnelMessages = STATE.messagesByTunnel[key] || [];
       const reason = tunnelMessages.length > 0 
         ? (tunnelMessages[0].text || tunnelMessages[0].title)
         : "Ingen merknader";
@@ -180,7 +209,7 @@
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), CONFIG.apiTimeoutMs);
       const response = await fetch(CONFIG.api, { cache: "no-store", signal: controller.signal });
       clearTimeout(timeoutId);
 
@@ -188,25 +217,19 @@
       const data = await response.json();
       
       STATE.retryCount = 0;
+      if (STATE.scheduledRetryId) {
+        clearTimeout(STATE.scheduledRetryId);
+        STATE.scheduledRetryId = null;
+      }
       STATE.lastSuccessfulUpdate = new Date();
       STATE.allMessages = data.stavanger?.messages || [];
+      rebuildTunnelMessageIndex(STATE.allMessages);
+      if (data.source !== "stale-cache") {
+        writeOfflineCache(data);
+      }
 
       Object.keys(TUNNELS).forEach(tunnelKey => {
         STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
-      });
-
-      // DEBUG: Log tunnel statuses to console
-      console.log("=== TUNNEL STATUSER ===");
-      Object.entries(STATE.tunnelStatuses).forEach(([key, status]) => {
-        const tunnel = TUNNELS[key];
-        const messages = STATE.allMessages.filter(msg => isRelevantToTunnel(msg, key));
-        console.log(`${tunnel.name}: ${status}`);
-        if (messages.length > 0) {
-          messages.forEach(msg => {
-            console.log(`  - ${msg.title}: ${msg.text}`);
-            console.log(`    Severity: ${msg.severity}`);
-          });
-        }
       });
 
       renderTunnelsGrid();
@@ -255,7 +278,11 @@
         }
       }
 
-      updateHealth(true, "System status: OK");
+      if (data.stale) {
+        updateHealth(false, "Ustabil API-kontakt (viser cache fra server)");
+      } else {
+        updateHealth(true, "System status: OK");
+      }
 
     } catch (err) {
       STATE.retryCount++;
@@ -263,9 +290,24 @@
 
       if (STATE.retryCount < CONFIG.maxRetries) {
         updateHealth(false, `Kobler til på nytt... (${STATE.retryCount}/${CONFIG.maxRetries})`);
-        setTimeout(() => load(), CONFIG.retryDelay);
+        STATE.scheduledRetryId = setTimeout(() => load(), CONFIG.retryDelay);
       } else {
-        updateHealth(false, "Ingen forbindelse til API");
+        const cached = readOfflineCache();
+        if (cached?.stavanger?.messages) {
+          STATE.allMessages = cached.stavanger.messages;
+          rebuildTunnelMessageIndex(STATE.allMessages);
+          Object.keys(TUNNELS).forEach(tunnelKey => {
+            STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
+          });
+          renderTunnelsGrid();
+          updateGlobalTheme();
+          updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");
+          if (dom.updated && cached.updated) {
+            dom.updated.textContent = `Oppdatert: ${fmtTime(cached.updated)} (cache)`;
+          }
+        } else {
+          updateHealth(false, "Ingen forbindelse til API");
+        }
         setTimeout(() => { STATE.retryCount = 0; }, 30000);
       }
     } finally {
