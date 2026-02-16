@@ -158,14 +158,21 @@
     }
 
     // DATEX 3.1 structured fields should be the primary source for status.
+    let hasMediumOrHigherSeverity = false;
     for (const msg of relevantMessages) {
       const constriction = String(msg.trafficConstrictionType || "").toLowerCase();
       const management = String(msg.roadManagementType || "").toLowerCase();
+      const sev = String(msg.severity || "").toLowerCase();
+      if (["highest", "high", "medium"].includes(sev)) hasMediumOrHigherSeverity = true;
       if (["roadblocked", "carriagewayblocked", "lanesblocked"].includes(constriction)) return "STENGT";
       if (["roadpartiallyobstructed", "carriagewaypartiallyobstructed", "lanespartiallyobstructed"].includes(constriction)) return "AVVIK";
       if (/(roadclosed|carriagewayclosed|lanesclosed|tunnelclosed|closed)/.test(management)) return "STENGT";
       if (/(alternatingcontraflow|intermittentclosures|contraflow|laneclosure)/.test(management)) return "AVVIK";
     }
+
+    // If DATEX says severity is none/low and there are no structured restrictions,
+    // keep the tunnel open even if text still mentions an earlier incident.
+    if (!hasMediumOrHigherSeverity) return "ÅPEN";
     
     // Check severity first (most reliable indicator)
     for (const msg of relevantMessages) {
