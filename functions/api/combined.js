@@ -8,14 +8,23 @@ export async function onRequest(context) {
   const upstream =
     "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
 
+  if (!user || !pass) {
+    return json(
+      {
+        updated: new Date().toISOString(),
+        error: "Missing DATEX credentials",
+        message:
+          "DATEX_USER and DATEX_PASS must be set in Cloudflare Pages environment variables.",
+      },
+      503
+    );
+  }
+
   try {
     const headers = {
       "User-Agent": "Byfjordtunnelen/1.0 (Cloudflare Pages)",
+      Authorization: "Basic " + btoa(`${user}:${pass}`),
     };
-
-    if (user && pass) {
-      headers.Authorization = "Basic " + btoa(`${user}:${pass}`);
-    }
 
     const res = await fetch(upstream, {
       method: "GET",

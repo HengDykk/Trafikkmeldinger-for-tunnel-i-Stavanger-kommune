@@ -186,7 +186,14 @@
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      
+
+      if (data.error) {
+        console.error("API error:", data.error, data.message);
+        updateHealth(false, `API-feil: ${data.error}`);
+        STATE.isRefreshing = false;
+        return;
+      }
+
       STATE.retryCount = 0;
       STATE.lastSuccessfulUpdate = new Date();
       STATE.allMessages = data.stavanger?.messages || [];
