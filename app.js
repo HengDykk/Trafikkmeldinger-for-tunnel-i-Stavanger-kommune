@@ -558,4 +558,22 @@
       dom.updated.title = relativeStr;
     }
   }, 60000);
+
+  // Optimize for display size (1920x1080 detection)
+  function optimizeForDisplay() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    
+    // Perfect for 1920x1080 Full HD displays
+    if (width >= 1920 && width < 2560) {
+      document.documentElement.style.setProperty('--detected-display', '1080p');
+    } 
+    // UHD/4K displays
+    else if (width >= 2560) {
+      document.documentElement.style.setProperty('--detected-display', 'uhd');
+    }
+  }
+  
+  optimizeForDisplay();
+  window.addEventListener('resize', optimizeForDisplay);
 })();
