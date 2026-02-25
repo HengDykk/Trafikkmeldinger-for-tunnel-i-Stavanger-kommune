@@ -12,7 +12,8 @@
     retryDelay: 5000,
     maxRetries: 3,
     apiTimeoutMs: 10000,
-    offlineCacheKey: "byfjord:lastPayload"
+    offlineCacheKey: "byfjord:lastPayload",
+    tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel"
   };
 
   const TUNNELS = {
@@ -33,7 +34,8 @@
     tunnelStatuses: {},
     allMessages: [],
     messagesByTunnel: {},
-    scheduledRetryId: null
+    scheduledRetryId: null,
+    lastClosedAtByTunnel: {}
   };
 
   const dom = {
@@ -49,6 +51,7 @@
   };
 
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
+  STATE.lastClosedAtByTunnel = readTunnelHistory();
 
   function readOfflineCache() {
     try {
@@ -62,6 +65,24 @@
   function writeOfflineCache(payload) {
     try {
       localStorage.setItem(CONFIG.offlineCacheKey, JSON.stringify(payload));
+    } catch {
+      // Ignore cache write failures (private mode/quota)
+    }
+  }
+
+  function readTunnelHistory() {
+    try {
+      const raw = localStorage.getItem(CONFIG.tunnelHistoryCacheKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function writeTunnelHistory(history) {
+    try {
+      localStorage.setItem(CONFIG.tunnelHistoryCacheKey, JSON.stringify(history));
     } catch {
       // Ignore cache write failures (private mode/quota)
     }
@@ -87,6 +108,34 @@
 
   function esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function isClosureMessage(msg) {
+    const txt = `${msg?.title || ""} ${msg?.text || ""}`.toLowerCase();
+    return /stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt);
+  }
+
+  function fmtClosedTime(iso) {
+    try {
+      if (!iso) return "Ukjent";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "Ukjent";
+
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      if (sameDay) {
+        return d.toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      return d.toLocaleString("no-NO", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch {
+      return "Ukjent";
+    }
   }
 
   async function loadWeather() {
@@ -178,9 +227,8 @@
     for (const msg of relevantMessages) {
       const sev = String(msg.severity || "").toUpperCase();
       if (sev === "HIGHEST" || sev === "HIGH") {
-        const txt = `${msg.title} ${msg.text}`.toLowerCase();
         // STENGT patterns (based on DATEX II spec)
-        if (/stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable/.test(txt)) {
+        if (isClosureMessage(msg)) {
           return "STENGT";
         }
       }
@@ -188,8 +236,7 @@
     
     // Check for closure/severe disruption patterns
     for (const msg of relevantMessages) {
-      const txt = `${msg.title} ${msg.text}`.toLowerCase();
-      if (/stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt)) {
+      if (isClosureMessage(msg)) {
         return "STENGT";
       }
     }
@@ -213,6 +260,26 @@
     STATE.messagesByTunnel = next;
   }
 
+  function updateTunnelClosureHistory(defaultTimeIso) {
+    const nextHistory = { ...STATE.lastClosedAtByTunnel };
+
+    for (const tunnelKey of Object.keys(TUNNELS)) {
+      const messages = STATE.messagesByTunnel[tunnelKey] || [];
+      const closureCandidates = messages
+        .filter((msg) => isClosureMessage(msg))
+        .map((msg) => msg.time || defaultTimeIso)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+      if (closureCandidates.length > 0) {
+        nextHistory[tunnelKey] = closureCandidates[0];
+      }
+    }
+
+    STATE.lastClosedAtByTunnel = nextHistory;
+    writeTunnelHistory(nextHistory);
+  }
+
   function renderTunnelsGrid() {
     if (!dom.tunnelsGrid) return;
     
@@ -232,7 +299,8 @@
         : "Ingen merknader";
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
-      const travelTime = tunnel.length > 0 ? `~${Math.ceil(tunnel.length/1000)} min` : "";
+      const lastClosedIso = STATE.lastClosedAtByTunnel[key];
+      const lastClosedText = lastClosedIso ? `Stengt sist: ${fmtClosedTime(lastClosedIso)}` : "Sist stengt: Ikke registrert";
       
       return `
         <div class="tunnelItem ${statusClass}">
@@ -241,7 +309,7 @@
               <div class="statusDot ${statusClass}"></div>
               <span class="statusLabel">${statusText}</span>
             </div>
-            ${travelTime ? `<span class="tunnelTime">${travelTime}</span>` : ''}
+            <span class="tunnelTime">${lastClosedText}</span>
           </div>
           <h3 class="tunnelItemName">${tunnel.name}</h3>
           ${lengthText ? `<div class="tunnelItemLength">${lengthText}</div>` : ''}
@@ -288,6 +356,7 @@
       Object.keys(TUNNELS).forEach(tunnelKey => {
         STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
       });
+      updateTunnelClosureHistory(data.updated);
 
       renderTunnelsGrid();
       updateGlobalTheme();
@@ -356,6 +425,7 @@
           Object.keys(TUNNELS).forEach(tunnelKey => {
             STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
           });
+          updateTunnelClosureHistory(cached.updated);
           renderTunnelsGrid();
           updateGlobalTheme();
           updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");
