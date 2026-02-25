@@ -181,7 +181,7 @@
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
-      const response = await fetch(CONFIG.api, { cache: "no-store", signal: controller.signal });
+      const response = await fetch(CONFIG.api, { signal: controller.signal });
       clearTimeout(timeoutId);
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -200,20 +200,6 @@
 
       Object.keys(TUNNELS).forEach(tunnelKey => {
         STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
-      });
-
-      // DEBUG: Log tunnel statuses to console
-      console.log("=== TUNNEL STATUSER ===");
-      Object.entries(STATE.tunnelStatuses).forEach(([key, status]) => {
-        const tunnel = TUNNELS[key];
-        const messages = STATE.allMessages.filter(msg => isRelevantToTunnel(msg, key));
-        console.log(`${tunnel.name}: ${status}`);
-        if (messages.length > 0) {
-          messages.forEach(msg => {
-            console.log(`  - ${msg.title}: ${msg.text}`);
-            console.log(`    Severity: ${msg.severity}`);
-          });
-        }
       });
 
       renderTunnelsGrid();

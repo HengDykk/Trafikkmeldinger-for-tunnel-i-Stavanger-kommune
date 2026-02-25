@@ -29,7 +29,7 @@ export async function onRequest(context) {
     const res = await fetch(upstream, {
       method: "GET",
       headers,
-      cf: { cacheTtl: 0, cacheEverything: false },
+      cf: { cacheTtl: 30, cacheEverything: true },
     });
 
     const xml = await res.text();
@@ -131,8 +131,7 @@ function isStavanger(m) {
 
     const stavangerOnly = messagesClean.filter(isStavanger);
 
-    // Fallback hvis tomt, ellers begrens til 25
-    const localOnly = stavangerOnly.length ? stavangerOnly.slice(0, 25) : messagesClean.slice(0, 25);
+    const localOnly = stavangerOnly.slice(0, 25);
 
     const nowIso = new Date().toISOString();
 
@@ -172,11 +171,12 @@ function isStavanger(m) {
 }
 
 function json(obj, status) {
+  const isError = status >= 400;
   return new Response(JSON.stringify(obj), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": isError ? "no-store" : "public, s-maxage=30, max-age=15",
       "Access-Control-Allow-Origin": "*",
     },
   });
