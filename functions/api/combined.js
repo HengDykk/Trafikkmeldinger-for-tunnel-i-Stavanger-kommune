@@ -86,10 +86,13 @@ export async function onRequest(context) {
       "ryfylketunnelen",
       "solbakk",
       "solbakktunnelen",
+      "finnøy",
+      "finnøytunnelen",
+      "finnfast",
+      "talgje",
+      "talgjetunnelen",
       "storhaug",
       "storhaugtunnelen",
-      "sotra",
-      "sotrasambandet",
     ];
 
     function isStavanger(m) {

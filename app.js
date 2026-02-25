@@ -20,9 +20,9 @@
     mastrafjord: { name: "Mastrafjordtunnelen", keywords: ["mastrafjord", "mastra"], length: 4424 },
     eiganes: { name: "Eiganestunnelen", keywords: ["eiganestunnelen", "eiganes tunnelen", "eiganes"], length: 3174 },
     hundvag: { name: "Hundvågtunnelen", keywords: ["hundvåg", "hundvaag"], length: 2100 },
-    ryfast: { name: "Ryfylketunnelen", keywords: ["ryfast", "ryfylke"], length: 14300 },
-    sotra: { name: "Sotrasambandet", keywords: ["sotra", "sotrasambandet"], length: 0 },
-    solbakk: { name: "Solbakktunnelen", keywords: ["solbakk"], length: 1350 },
+    ryfast: { name: "Ryfylketunnelen", keywords: ["ryfast", "ryfylke", "solbakk"], length: 14300 },
+    finnoy: { name: "Finnøytunnelen", keywords: ["finnøy", "finnøytunnelen", "finnfast"], length: 5685 },
+    talgje: { name: "Talgjetunnelen", keywords: ["talgje", "talgjetunnelen"], length: 1467 },
     storhaug: { name: "Storhaugtunnelen", keywords: ["storhaug"], length: 1100 }
   };
 
