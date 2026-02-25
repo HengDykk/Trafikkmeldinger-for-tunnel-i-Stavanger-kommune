@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge origin/claude/check-everything-W32Rb --no-ff -m \"Merge: Korriger tunnelliste – fjern Sotrasambandet/Solbakktunnelen, legg til Finnøy/Talgje\")",
+      "Bash(git push origin main)"
+    ]
+  }
+}
