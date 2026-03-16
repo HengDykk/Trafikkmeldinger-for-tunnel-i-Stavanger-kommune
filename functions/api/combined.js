@@ -23,6 +23,25 @@ const TUNNEL_REGISTRY = {
   talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", matchTerms: ["talgjetunnelen"] },
   storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", matchTerms: ["storhaugtunnelen"] },
 };
+
+const TRAVEL_TIME_WFS_URL =
+  "https://ogckart-sn1.atlas.vegvesen.no/datex_3_1/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=datex_3_1%3ATravelTimeSimple&outputFormat=application%2Fjson&bbox=5.2,58.85,6.3,59.25,EPSG:4326&maxFeatures=400";
+
+const TRAVEL_TIME_ROUTE_MATCHERS = {
+  byfjord: [
+    "auglendshøyden - dusavik",
+    "dusavik - auglendshøyden",
+    "tjensvoll - dusavik",
+    "dusavik - tjensvoll",
+  ],
+  eiganes: [
+    "auglendshøyden - tjensvoll",
+    "tjensvoll - auglendshøyden",
+    "tjensvoll - madlaveien ved dnb arena",
+    "madlaveien ved dnb arena - tjensvoll",
+  ],
+};
+
 function normalizeHistorySeed(seed) {
   const out = {};
   for (const [key, value] of Object.entries(seed || {})) {
@@ -32,6 +51,138 @@ function normalizeHistorySeed(seed) {
     out[key] = d.toISOString();
   }
   return out;
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function scoreTravelFlow(feature) {
+  const missingData = Boolean(feature?.missingData);
+  const delayedPercent = Number(feature?.delayedPercent);
+  const delayAbs = Number.isFinite(delayedPercent) ? Math.abs(delayedPercent) : 0;
+  return (missingData ? 0 : 1000) + delayAbs;
+}
+
+function classifyTravelFlow(feature) {
+  if (!feature || feature.missingData) return null;
+
+  const status = normalizeText(feature.trafficStatusValue);
+  const delayedPercent = Number(feature.delayedPercent);
+
+  if (/stationary|stopandgo|closed/.test(status)) return "RED";
+  if (/heavy|congested|slow/.test(status)) {
+    return Number.isFinite(delayedPercent) && delayedPercent >= 20 ? "RED" : "YELLOW";
+  }
+  if (/freeflow/.test(status)) {
+    if (Number.isFinite(delayedPercent) && delayedPercent >= 20) return "RED";
+    if (Number.isFinite(delayedPercent) && delayedPercent >= 8) return "YELLOW";
+    return "GREEN";
+  }
+
+  if (Number.isFinite(delayedPercent) && delayedPercent >= 20) return "RED";
+  if (Number.isFinite(delayedPercent) && delayedPercent >= 8) return "YELLOW";
+  if (Number.isFinite(delayedPercent)) return "GREEN";
+  return null;
+}
+
+function summarizeTravelFlows(features) {
+  const byRoute = new Map();
+
+  for (const feature of features || []) {
+    const props = feature?.properties || {};
+    const route = normalizeText(props.locationDescription);
+    if (!route) continue;
+
+    const next = {
+      locationDescription: props.locationDescription || "",
+      trafficStatusValue: props.trafficStatusValue || "",
+      actualTime: props.actualTime,
+      expectedTime: props.expectedTime,
+      delayedTime: props.delayedTime,
+      delayedPercent: props.delayedPercent,
+      trendType: props.trendType || "",
+      missingData: Boolean(props.missingData),
+      updated: props.sistOppdatert || props.publicationTime || "",
+    };
+
+    const prev = byRoute.get(route);
+    if (!prev || scoreTravelFlow(next) > scoreTravelFlow(prev)) {
+      byRoute.set(route, next);
+    }
+  }
+
+  const result = {};
+
+  for (const tunnelKey of Object.keys(TUNNEL_REGISTRY)) {
+    const routeTerms = TRAVEL_TIME_ROUTE_MATCHERS[tunnelKey] || [];
+    const candidates = routeTerms
+      .map((term) => byRoute.get(term))
+      .filter(Boolean)
+      .sort((a, b) => scoreTravelFlow(b) - scoreTravelFlow(a));
+
+    const best = candidates[0];
+    const level = classifyTravelFlow(best);
+
+    result[tunnelKey] = best && level
+      ? {
+          source: "travel-time",
+          coverage: "nearest-measured-route",
+          level,
+          routeDescription: best.locationDescription,
+          trafficStatusValue: best.trafficStatusValue,
+          actualTime: best.actualTime,
+          expectedTime: best.expectedTime,
+          delayedTime: best.delayedTime,
+          delayedPercent: best.delayedPercent,
+          trendType: best.trendType,
+          updated: best.updated,
+        }
+      : {
+          source: "travel-time",
+          coverage: routeTerms.length ? "no-live-data" : "unavailable",
+          level: "UNKNOWN",
+          routeDescription: best?.locationDescription || "",
+          updated: best?.updated || "",
+        };
+  }
+
+  return result;
+}
+
+async function fetchTravelTimeData(timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(TRAVEL_TIME_WFS_URL, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Byfjordtunnelen/1.0 (Cloudflare Pages)",
+        Accept: "application/json",
+      },
+      cf: {
+        cacheTtl: 60,
+        cacheEverything: true,
+      },
+    });
+
+    if (!response.ok) {
+      return summarizeTravelFlows([]);
+    }
+
+    const payload = await response.json().catch(() => null);
+    return summarizeTravelFlows(payload?.features || []);
+  } catch {
+    return summarizeTravelFlows([]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function onRequest(context) {
@@ -59,7 +210,7 @@ export async function onRequest(context) {
     headers.Authorization = "Basic " + btoa(`${user}:${pass}`);
   }
 
-  const buildPayload = (messagesClean, previousHistory = {}, seedHistory = {}) => {
+  const buildPayload = (messagesClean, travelFlowByTunnel = {}, previousHistory = {}, seedHistory = {}) => {
     // Strengt kommune filter: krev lokal stedsreferanse, ikke vegnummer.
     // Ikke ha E39 her, den ødelegger alt.
     const stavangerMustHave = [
@@ -187,6 +338,7 @@ export async function onRequest(context) {
     return {
       updated: nowIso,
       stavanger: { messages: localOnly },
+      travelFlowByTunnel,
       byfjord: {
         status: byStatus,
         reason: byfjordMsg ? (byfjordMsg.text || byfjordMsg.title) : "",
@@ -212,7 +364,8 @@ export async function onRequest(context) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const res = await fetch(upstream, {
+    const [res, travelFlowByTunnel] = await Promise.all([
+      fetch(upstream, {
       method: "GET",
       headers,
       signal: controller.signal,
@@ -220,7 +373,9 @@ export async function onRequest(context) {
         cacheTtl: 30,
         cacheEverything: true,
       },
-    });
+      }),
+      fetchTravelTimeData(timeoutMs),
+    ]);
 
     clearTimeout(timeoutId);
     const xml = await res.text();
@@ -258,7 +413,7 @@ export async function onRequest(context) {
       messagesClean.push(m);
     }
 
-    const payload = { ...buildPayload(messagesClean, previousHistory || {}, seedHistory), source: "live", stale: false };
+    const payload = { ...buildPayload(messagesClean, travelFlowByTunnel, previousHistory || {}, seedHistory), source: "live", stale: false };
     const response = json(payload, 200, "public, max-age=15, s-maxage=30, stale-while-revalidate=120");
 
     const historyResponse = new Response(JSON.stringify(payload.tunnelHistory || {}), {

@@ -240,10 +240,22 @@ body {
   color: var(--bad);
   background: rgba(255, 51, 51, 0.10);
 }
+.trafficFlowBadge.traffic-unknown {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+}
 .trafficFlowText {
   font-size: 13px;
   color: var(--text);
   opacity: 0.85;
+}
+.trafficFlowDataText {
+  color: var(--muted);
+  opacity: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .tunnelItemReason {
   font-size: 14px;

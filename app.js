@@ -54,7 +54,9 @@
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
   STATE.lastClosedAtByTunnel = readTunnelHistory();
 
-  Object.keys(TUNNELS).forEach(key => { STATE.tunnelTrafficFlow[key] = "GREEN"; });
+  Object.keys(TUNNELS).forEach(key => {
+    STATE.tunnelTrafficFlow[key] = { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
+  });
 
   function readOfflineCache() {
     try {
@@ -304,6 +306,92 @@
     }
   }
 
+  function normalizeTrafficFlow(flow) {
+    if (!flow || typeof flow !== "object") {
+      return { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
+    }
+
+    return {
+      level: flow.level || "UNKNOWN",
+      source: flow.source || "travel-time",
+      coverage: flow.coverage || "unavailable",
+      routeDescription: flow.routeDescription || "",
+      trafficStatusValue: flow.trafficStatusValue || "",
+      actualTime: flow.actualTime,
+      expectedTime: flow.expectedTime,
+      delayedTime: flow.delayedTime,
+      delayedPercent: flow.delayedPercent,
+      trendType: flow.trendType || "",
+      updated: flow.updated || ""
+    };
+  }
+
+  function fmtDurationSeconds(seconds) {
+    const total = Number(seconds);
+    if (!Number.isFinite(total)) return "";
+    const mins = Math.floor(total / 60);
+    const secs = Math.abs(total % 60);
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  }
+
+  function getRealTrafficFlowDisplayMeta(flow) {
+    switch (flow?.level) {
+      case "RED":
+        return {
+          className: "traffic-red",
+          level: "Høy",
+          icon: "🔴",
+          description: "Høy trafikkbelastning basert på reisetidsdata"
+        };
+      case "YELLOW":
+        return {
+          className: "traffic-yellow",
+          level: "Middels",
+          icon: "🟡",
+          description: "Middels trafikkbelastning basert på reisetidsdata"
+        };
+      case "UNKNOWN":
+        return {
+          className: "traffic-unknown",
+          level: "Ingen data",
+          icon: "⚪",
+          description: "Ingen sanntidsmåling fra Vegvesenet for denne tunnelen"
+        };
+      default:
+        return {
+          className: "traffic-green",
+          level: "Lav",
+          icon: "🟢",
+          description: "Lav trafikkbelastning basert på reisetidsdata"
+        };
+    }
+  }
+
+  function getTrafficFlowDetails(flow) {
+    if (!flow || flow.level === "UNKNOWN") {
+      return "Ingen sanntidsmåling tilgjengelig i Vegvesenets reisetidsfeed.";
+    }
+
+    const parts = [];
+    if (flow.routeDescription) {
+      parts.push(`Målt via ${flow.routeDescription}.`);
+    }
+
+    const actual = fmtDurationSeconds(flow.actualTime);
+    const expected = fmtDurationSeconds(flow.expectedTime);
+    if (actual && expected) {
+      parts.push(`Reisetid ${actual} mot normalt ${expected}.`);
+    }
+
+    const delayedPercent = Number(flow.delayedPercent);
+    if (Number.isFinite(delayedPercent)) {
+      const sign = delayedPercent > 0 ? "+" : "";
+      parts.push(`${sign}${delayedPercent}% mot referanse.`);
+    }
+
+    return parts.join(" ");
+  }
+
   function updateTunnelClosureHistory(defaultTimeIso) {
     const nextHistory = { ...STATE.lastClosedAtByTunnel };
 
@@ -336,8 +424,8 @@
     if (!dom.tunnelsGrid) return;
     
     const html = Object.entries(TUNNELS).map(([key, tunnel]) => {
-      const trafficFlow = STATE.tunnelTrafficFlow[key] || "GREEN";
-      const trafficMeta = getTrafficFlowDisplayMeta(trafficFlow);
+      const trafficFlow = normalizeTrafficFlow(STATE.tunnelTrafficFlow[key]);
+      const trafficMeta = getRealTrafficFlowDisplayMeta(trafficFlow);
       const status = STATE.tunnelStatuses[key] || "ÅPEN";
       const statusClass = 
         status === "ÅPEN" ? "status-open" :
@@ -374,6 +462,7 @@
             </span>
           </div>
           <div class="trafficFlowText">${trafficMeta.description}</div>
+          <div class="trafficFlowText trafficFlowDataText">${esc(getTrafficFlowDetails(trafficFlow))}</div>
           <div class="tunnelItemReason">${esc(reason)}</div>
         </div>
       `;
@@ -416,7 +505,7 @@
 
       Object.keys(TUNNELS).forEach(tunnelKey => {
         STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
-        STATE.tunnelTrafficFlow[tunnelKey] = determineTrafficFlow(STATE.allMessages, tunnelKey);
+        STATE.tunnelTrafficFlow[tunnelKey] = normalizeTrafficFlow(data.travelFlowByTunnel?.[tunnelKey]);
       });
       if (data.tunnelHistory && typeof data.tunnelHistory === "object") {
         STATE.lastClosedAtByTunnel = { ...data.tunnelHistory };
@@ -491,7 +580,7 @@
           rebuildTunnelMessageIndex(STATE.allMessages);
           Object.keys(TUNNELS).forEach(tunnelKey => {
             STATE.tunnelStatuses[tunnelKey] = determineTunnelStatus(STATE.allMessages, tunnelKey);
-            STATE.tunnelTrafficFlow[tunnelKey] = determineTrafficFlow(STATE.allMessages, tunnelKey);
+            STATE.tunnelTrafficFlow[tunnelKey] = normalizeTrafficFlow(cached.travelFlowByTunnel?.[tunnelKey]);
           });
           updateTunnelClosureHistory(cached.updated);
           renderTunnelsGrid();
