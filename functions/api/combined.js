@@ -29,7 +29,7 @@ const TOMTOM_FLOW_POINTS = {
   hundvag: { lat: 58.9869, lon: 5.7488 },
   ryfast: { lat: 58.9778, lon: 5.7754 },
   finnoy: { lat: 59.1705, lon: 5.8443 },
-  talgje: null,
+  talgje: { lat: 59.145, lon: 5.84 },
   storhaug: { lat: 58.9558, lon: 5.7461 },
 };
 
