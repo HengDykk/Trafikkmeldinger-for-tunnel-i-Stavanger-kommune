@@ -117,16 +117,7 @@
     const tunnel = TUNNELS[tunnelKey];
     if (!tunnel) return false;
     const text = `${message.title || ""} ${message.text || ""} ${message.where || ""}`.toLowerCase();
-    const keywordHit = tunnel.keywords.some(keyword => text.includes(keyword));
-    if (!keywordHit) return false;
-
-    // Avoid false positives for area names (e.g. "Eiganes") when the event is not tunnel-specific.
-    if (tunnelKey === "eiganes" && text.includes("eiganes") && !text.includes("eiganestunnelen")) {
-      const hasTunnelWord = /tunnel|tunell/.test(text);
-      if (!hasTunnelWord) return false;
-    }
-
-    return true;
+    return tunnel.keywords.some(keyword => text.includes(keyword));
   }
 
   function isMessageActiveNow(message) {
