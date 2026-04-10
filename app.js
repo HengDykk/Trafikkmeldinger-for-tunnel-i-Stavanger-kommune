@@ -13,18 +13,20 @@
     maxRetries: 3,
     apiTimeoutMs: 10000,
     offlineCacheKey: "byfjord:lastPayload",
-    tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel"
+    tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel",
+    tunnelCardFlipDelayMs: 10000,
+    tunnelCardFlipDurationMs: 5000
   };
 
   const TUNNELS = {
-    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875 },
-    mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424 },
-    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3174 },
+    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, cameras: [{ id: "nord", label: "Mot Byfjordtunnelen" }, { id: "sor", label: "Mot Stavanger" }] },
+    mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, cameras: [] },
+    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3174, cameras: [] },
     hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 2100 },
-    ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300 },
+    ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, cameras: [] },
     finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685 },
-    talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", keywords: ["talgjetunnelen"], length: 1467 },
-    storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", keywords: ["storhaugtunnelen"], length: 1100 }
+    talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", keywords: ["talgjetunnelen"], length: 1467, cameras: [] },
+    storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", keywords: ["storhaugtunnelen"], length: 1100, cameras: [] }
   };
 
   const STATE = {
@@ -36,7 +38,11 @@
     allMessages: [],
     messagesByTunnel: {},
     scheduledRetryId: null,
-    lastClosedAtByTunnel: {}
+    lastClosedAtByTunnel: {},
+    tunnelCameraAvailability: {},
+    flippedTunnelKeys: new Set(),
+    tunnelFlipIntervalId: null,
+    tunnelFlipResetId: null
   };
 
   const dom = {
@@ -56,6 +62,7 @@
 
   Object.keys(TUNNELS).forEach(key => {
     STATE.tunnelTrafficFlow[key] = { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
+    STATE.tunnelCameraAvailability[key] = [];
   });
 
   function readOfflineCache() {
@@ -114,6 +121,79 @@
 
   function esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function getTunnelCameraSources(tunnelKey) {
+    const tunnel = TUNNELS[tunnelKey];
+    const cameras = Array.isArray(tunnel?.cameras) ? tunnel.cameras : [];
+    const cacheBuster = Date.now();
+    return cameras.map((camera) => ({
+      ...camera,
+      src: `/api/cam?id=${encodeURIComponent(camera.id)}&t=${cacheBuster}`
+    }));
+  }
+
+  function checkImageAvailability(src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = src;
+    });
+  }
+
+  async function refreshTunnelCameraAvailability() {
+    const entries = await Promise.all(
+      Object.keys(TUNNELS).map(async (tunnelKey) => {
+        const sources = getTunnelCameraSources(tunnelKey);
+        if (!sources.length) return [tunnelKey, []];
+
+        const checks = await Promise.all(
+          sources.map(async (camera) => ((await checkImageAvailability(camera.src)) ? camera : null))
+        );
+
+        return [tunnelKey, checks.filter(Boolean)];
+      })
+    );
+
+    STATE.tunnelCameraAvailability = Object.fromEntries(entries);
+    renderTunnelsGrid();
+    scheduleTunnelCardRotation();
+  }
+
+  function scheduleTunnelCardRotation() {
+    if (STATE.tunnelFlipIntervalId) {
+      clearInterval(STATE.tunnelFlipIntervalId);
+      STATE.tunnelFlipIntervalId = null;
+    }
+    if (STATE.tunnelFlipResetId) {
+      clearTimeout(STATE.tunnelFlipResetId);
+      STATE.tunnelFlipResetId = null;
+    }
+
+    const cameraTunnelKeys = Object.keys(TUNNELS).filter(
+      (tunnelKey) => (STATE.tunnelCameraAvailability[tunnelKey] || []).length > 0
+    );
+
+    STATE.flippedTunnelKeys = new Set();
+    renderTunnelsGrid();
+
+    if (!cameraTunnelKeys.length) return;
+
+    const flipCards = () => {
+      STATE.flippedTunnelKeys = new Set(cameraTunnelKeys);
+      renderTunnelsGrid();
+
+      STATE.tunnelFlipResetId = setTimeout(() => {
+        STATE.flippedTunnelKeys = new Set();
+        renderTunnelsGrid();
+      }, CONFIG.tunnelCardFlipDurationMs);
+    };
+
+    STATE.tunnelFlipResetId = setTimeout(() => {
+      flipCards();
+      STATE.tunnelFlipIntervalId = setInterval(flipCards, CONFIG.tunnelCardFlipDelayMs + CONFIG.tunnelCardFlipDurationMs);
+    }, CONFIG.tunnelCardFlipDelayMs);
   }
 
 
@@ -442,28 +522,60 @@
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
       const tunnelMetaText = getTunnelMetaText(tunnelMessages);
+      const cameras = STATE.tunnelCameraAvailability[key] || [];
+      const isFlipped = cameras.length > 0 && STATE.flippedTunnelKeys.has(key);
+      const frontHtml = `
+        <div class="tunnelItemHeader">
+          <div class="tunnelItemStatus">
+            <div class="statusDot ${statusClass}"></div>
+            <span class="statusLabel">${statusText}</span>
+          </div>
+          <span class="tunnelTime">${tunnelMetaText}</span>
+        </div>
+        <h3 class="tunnelItemName">${tunnel.name}</h3>
+        ${lengthText ? `<div class="tunnelItemLength">${lengthText}</div>` : ''}
+        <div class="trafficFlowRow">
+          <span class="trafficFlowLabel">Trafikkflyt</span>
+          <span class="trafficFlowBadge ${trafficMeta.className}">
+            <span class="trafficFlowIcon" aria-hidden="true">${trafficMeta.icon}</span>
+            <span class="trafficFlowLevel">${trafficMeta.level}</span>
+          </span>
+        </div>
+        <div class="trafficFlowText">${trafficMeta.description}</div>
+        <div class="trafficFlowText trafficFlowDataText">${esc(getTrafficFlowDetails(trafficFlow))}</div>
+        <div class="tunnelItemReason">${esc(reason)}</div>
+      `;
+      const backHtml = cameras.length
+        ? `
+          <div class="tunnelCameraHeader">
+            <span class="tunnelCameraTitle">Kamerabilder</span>
+            <span class="tunnelCameraMeta">${tunnel.name}</span>
+          </div>
+          <div class="tunnelCameraGrid ${cameras.length === 1 ? "single" : ""}">
+            ${cameras.map((camera) => `
+              <figure class="tunnelCameraFigure">
+                <img class="tunnelCameraImage" src="${esc(camera.src)}" alt="${esc(camera.label)}" loading="lazy" referrerpolicy="no-referrer">
+                <figcaption class="tunnelCameraCaption">${esc(camera.label)}</figcaption>
+              </figure>
+            `).join("")}
+          </div>
+        `
+        : `
+          <div class="tunnelCameraEmpty">
+            <div class="tunnelCameraTitle">Ingen kamerabilder</div>
+          </div>
+        `;
 
       return `
-        <div class="tunnelItem ${statusClass}">
-          <div class="tunnelItemHeader">
-            <div class="tunnelItemStatus">
-              <div class="statusDot ${statusClass}"></div>
-              <span class="statusLabel">${statusText}</span>
+        <div class="tunnelItem ${statusClass} ${isFlipped ? "is-flipped" : ""} ${cameras.length ? "has-camera" : ""}">
+          <div class="tunnelItemInner">
+            <div class="tunnelItemFace tunnelItemFront">
+              ${frontHtml}
             </div>
-            <span class="tunnelTime">${tunnelMetaText}</span>
+            <div class="tunnelItemFace tunnelItemBack">
+              ${backHtml}
+            </div>
           </div>
-          <h3 class="tunnelItemName">${tunnel.name}</h3>
-          ${lengthText ? `<div class="tunnelItemLength">${lengthText}</div>` : ''}
-          <div class="trafficFlowRow">
-            <span class="trafficFlowLabel">Trafikkflyt</span>
-            <span class="trafficFlowBadge ${trafficMeta.className}">
-              <span class="trafficFlowIcon" aria-hidden="true">${trafficMeta.icon}</span>
-              <span class="trafficFlowLevel">${trafficMeta.level}</span>
-            </span>
-          </div>
-          <div class="trafficFlowText">${trafficMeta.description}</div>
-          <div class="trafficFlowText trafficFlowDataText">${esc(getTrafficFlowDetails(trafficFlow))}</div>
-          <div class="tunnelItemReason">${esc(reason)}</div>
         </div>
       `;
     }).join("");
@@ -516,6 +628,7 @@
 
       renderTunnelsGrid();
       updateGlobalTheme();
+      refreshTunnelCameraAvailability();
 
       const updatedStr = fmtTime(data.updated);
       if (dom.updated) dom.updated.textContent = `Oppdatert: ${updatedStr}`;
@@ -587,6 +700,7 @@
           updateTunnelClosureHistory(cached.updated);
           renderTunnelsGrid();
           updateGlobalTheme();
+          refreshTunnelCameraAvailability();
           updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");
           if (dom.updated && cached.updated) {
             dom.updated.textContent = `Oppdatert: ${fmtTime(cached.updated)} (cache)`;
