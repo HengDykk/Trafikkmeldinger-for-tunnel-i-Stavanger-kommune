@@ -42,7 +42,6 @@
     messagesByTunnel: {},
     scheduledRetryId: null,
     lastClosedAtByTunnel: {},
-    tunnelCameraAvailability: {},
     flippedTunnelKeys: new Set(),
     tunnelFlipIntervalId: null,
     tunnelFlipResetId: null
@@ -65,7 +64,6 @@
 
   Object.keys(TUNNELS).forEach(key => {
     STATE.tunnelTrafficFlow[key] = { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
-    STATE.tunnelCameraAvailability[key] = [];
   });
 
   function readOfflineCache() {
@@ -136,34 +134,6 @@
     }));
   }
 
-  function checkImageAvailability(src) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
-      img.src = src;
-    });
-  }
-
-  async function refreshTunnelCameraAvailability() {
-    const entries = await Promise.all(
-      Object.keys(TUNNELS).map(async (tunnelKey) => {
-        const sources = getTunnelCameraSources(tunnelKey);
-        if (!sources.length) return [tunnelKey, []];
-
-        const checks = await Promise.all(
-          sources.map(async (camera) => ((await checkImageAvailability(camera.src)) ? camera : null))
-        );
-
-        return [tunnelKey, checks.filter(Boolean)];
-      })
-    );
-
-    STATE.tunnelCameraAvailability = Object.fromEntries(entries);
-    renderTunnelsGrid();
-    scheduleTunnelCardRotation();
-  }
-
   function scheduleTunnelCardRotation() {
     if (STATE.tunnelFlipIntervalId) {
       clearInterval(STATE.tunnelFlipIntervalId);
@@ -175,7 +145,7 @@
     }
 
     const cameraTunnelKeys = Object.keys(TUNNELS).filter(
-      (tunnelKey) => (STATE.tunnelCameraAvailability[tunnelKey] || []).length > 0
+      (tunnelKey) => getTunnelCameraSources(tunnelKey).length > 0
     );
 
     STATE.flippedTunnelKeys = new Set();
@@ -525,7 +495,7 @@
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
       const tunnelMetaText = getTunnelMetaText(tunnelMessages);
-      const cameras = STATE.tunnelCameraAvailability[key] || [];
+      const cameras = getTunnelCameraSources(key);
       const isFlipped = cameras.length > 0 && STATE.flippedTunnelKeys.has(key);
       const frontHtml = `
         <div class="tunnelItemHeader">
@@ -631,7 +601,7 @@
 
       renderTunnelsGrid();
       updateGlobalTheme();
-      refreshTunnelCameraAvailability();
+      scheduleTunnelCardRotation();
 
       const updatedStr = fmtTime(data.updated);
       if (dom.updated) dom.updated.textContent = `Oppdatert: ${updatedStr}`;
@@ -703,7 +673,7 @@
           updateTunnelClosureHistory(cached.updated);
           renderTunnelsGrid();
           updateGlobalTheme();
-          refreshTunnelCameraAvailability();
+          scheduleTunnelCardRotation();
           updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");
           if (dom.updated && cached.updated) {
             dom.updated.textContent = `Oppdatert: ${fmtTime(cached.updated)} (cache)`;
