@@ -109,6 +109,143 @@
     }
   }
 
+  const STATUS_CLASS = { "ÅPEN": "status-open", "STENGT": "status-closed", "AVVIK": "status-warning" };
+
+  function msgKey(m) {
+    return `${m.time || ""}|${(m.title || "").trim()}|${(m.text || "").trim()}`;
+  }
+
+  function fmtMinutes(mins) {
+    if (mins <= 1) return "snart";
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h} t ${m} min` : `${h} t`;
+  }
+
+  function getRushHourStatus() {
+    const now = new Date();
+    const day = now.getDay();
+    const isWeekday = day >= 1 && day <= 5;
+    const todayMin = now.getHours() * 60 + now.getMinutes();
+    const MORN_START = 390; // 06:30
+    const MORN_END   = 540; // 09:00
+    const AFT_START  = 900; // 15:00
+    const AFT_END    = 1080; // 18:00
+
+    if (!isWeekday) {
+      const nextDay = day === 6 ? "mandag" : "i morgen";
+      return { label: "Helg", className: "rush-weekend", detail: `Morgenrush ${nextDay} 06:30` };
+    }
+    if (todayMin >= MORN_START && todayMin < MORN_END) {
+      return { label: "Morgenrush", className: "rush-active", detail: `Slutter om ${fmtMinutes(MORN_END - todayMin)}` };
+    }
+    if (todayMin >= AFT_START && todayMin < AFT_END) {
+      return { label: "Ettermiddagsrush", className: "rush-active", detail: `Slutter om ${fmtMinutes(AFT_END - todayMin)}` };
+    }
+    if (todayMin < MORN_START) {
+      return { label: "Stille periode", className: "rush-quiet", detail: `Morgenrush starter om ${fmtMinutes(MORN_START - todayMin)}` };
+    }
+    if (todayMin < AFT_START) {
+      return { label: "Stille periode", className: "rush-quiet", detail: `Ettermiddagsrush starter om ${fmtMinutes(AFT_START - todayMin)}` };
+    }
+    const tomorrowIsWeekday = ((day + 1) % 7) >= 1 && ((day + 1) % 7) <= 5;
+    return { label: "Stille periode", className: "rush-quiet", detail: tomorrowIsWeekday ? "Morgenrush i morgen 06:30" : "Morgenrush mandag 06:30" };
+  }
+
+  function renderRushHourBanner() {
+    const banner = document.getElementById("rushHourBanner");
+    if (!banner) return;
+    const s = getRushHourStatus();
+    banner.className = `rushHourBanner ${s.className}`;
+    banner.innerHTML = `<span class="rushLabel">${s.label}</span><span class="rushDetail">${s.detail}</span>`;
+  }
+
+  function messageItemHtml(m) {
+    const sev = String(m.severity || "").toUpperCase();
+    const cls = (sev === "HIGH" || sev === "HIGHEST") ? "bad" : sev === "MEDIUM" ? "warn" : "info";
+    const icon = (sev === "HIGH" || sev === "HIGHEST")
+      ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+      : sev === "MEDIUM"
+      ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
+      : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+    const body = esc(m.text || m.title || "");
+    const source = m.sourceLabel ? `<span class="msgSource">${esc(m.sourceLabel)}</span>` : "";
+    return `<div class="msgItem ${cls}"><span class="msgIcon ${cls}">${icon}</span><div class="msgBody"><div class="msgText">${body}</div>${source}</div></div>`;
+  }
+
+  function renderMessagePanel() {
+    if (!dom.items) return;
+    stopAutoScroll();
+
+    // Build tunnel groups — messages that match a specific tunnel
+    const tunnelMsgKeys = new Set();
+    const groups = [];
+    for (const [key, tunnel] of Object.entries(TUNNELS)) {
+      const msgs = (STATE.messagesByTunnel[key] || []).filter(m => isMessageActiveNow(m));
+      if (msgs.length > 0) {
+        groups.push({ key, tunnel, msgs });
+        msgs.forEach(m => tunnelMsgKeys.add(msgKey(m)));
+      }
+    }
+
+    // General high-priority messages not matched to any tunnel
+    const generalMsgs = STATE.allMessages.filter(m => {
+      if (tunnelMsgKeys.has(msgKey(m))) return false;
+      const sev = String(m.severity || "").toUpperCase();
+      return sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM";
+    }).slice(0, 5);
+
+    // Update event count
+    if (dom.eventCount) {
+      const n = groups.length;
+      dom.eventCount.textContent = n > 0
+        ? `${n} tunnel${n === 1 ? "hendelse" : "hendelser"}`
+        : "Ingen tunnelhendelser";
+    }
+
+    if (groups.length === 0 && generalMsgs.length === 0) {
+      dom.items.innerHTML = `
+        <div class="emptyState">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+          </svg>
+          <div>Ingen aktive hendelser</div>
+          <div class="emptyStateText">Alle tunneler er åpne og uten merknader</div>
+        </div>`;
+      return;
+    }
+
+    let html = "";
+
+    for (const { key, tunnel, msgs } of groups) {
+      const dotCls = STATUS_CLASS[STATE.tunnelStatuses[key]] || "status-open";
+      html += `
+        <div class="tunnelGroup">
+          <div class="tunnelGroupHeader">
+            <div class="tunnelGroupDot ${dotCls}"></div>
+            ${esc(tunnel.name)}
+          </div>
+          <div class="tunnelGroupItems">
+            ${msgs.map(m => messageItemHtml(m)).join("")}
+          </div>
+        </div>`;
+    }
+
+    if (generalMsgs.length > 0) {
+      html += `
+        <div class="tunnelGroup">
+          <div class="tunnelGroupHeader generalGroupHeader">Annet i Stavanger</div>
+          <div class="tunnelGroupItems">
+            ${generalMsgs.map(m => messageItemHtml(m)).join("")}
+          </div>
+        </div>`;
+    }
+
+    dom.items.innerHTML = html;
+    startAutoScroll();
+  }
+
   function startProgressCountdown() {
     if (!dom.progressFill) return;
     if (STATE.progressAnimId) cancelAnimationFrame(STATE.progressAnimId);
@@ -383,68 +520,6 @@
     return "ÅPEN";
   }
 
-  function determineTrafficFlow(messages, tunnelKey) {
-    const relevantMessages = messages
-      .filter(msg => isRelevantToTunnel(msg, tunnelKey))
-      .filter(msg => isMessageActiveNow(msg))
-      .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
-
-    if (relevantMessages.length === 0) return "GREEN";
-
-    for (const msg of relevantMessages) {
-      const txt = `${msg.title || ""} ${msg.text || ""}`.toLowerCase();
-      if (/stillest[åa]ende|sv[æa]rt tett trafikk|lange k[øo]er|lang k[øo]|k[øo] over|store forsinkelser|betydelig forsinkelse|sakteg[åa]ende/.test(txt)) {
-        return "RED";
-      }
-    }
-
-    for (const msg of relevantMessages) {
-      const txt = `${msg.title || ""} ${msg.text || ""}`.toLowerCase();
-      if (/k[øo]|tett trafikk|forsinkelse|redusert hastighet|redusert framkommelighet|framkommelighet|ulykke|trafikkulykke|kolonne|lysregulering|dirigering|stans/.test(txt)) {
-        return "YELLOW";
-      }
-    }
-
-    return "GREEN";
-  }
-
-  function getTrafficFlowMeta(flow) {
-    switch (flow) {
-      case "RED":
-        return { className: "traffic-red", label: "Rød", description: "Treg eller tett trafikk" };
-      case "YELLOW":
-        return { className: "traffic-yellow", label: "Gul", description: "Noe treg trafikk" };
-      default:
-        return { className: "traffic-green", label: "Grønn", description: "Normal flyt" };
-    }
-  }
-
-  function getTrafficFlowDisplayMeta(flow) {
-    switch (flow) {
-      case "RED":
-        return {
-          className: "traffic-red",
-          level: "Høy",
-          icon: "🔴",
-          description: "Høy trafikkbelastning med treg eller tett trafikk"
-        };
-      case "YELLOW":
-        return {
-          className: "traffic-yellow",
-          level: "Middels",
-          icon: "🟡",
-          description: "Middels trafikkbelastning med noe treg flyt"
-        };
-      default:
-        return {
-          className: "traffic-green",
-          level: "Lav",
-          icon: "🟢",
-          description: "Lav trafikkbelastning og normal flyt"
-        };
-    }
-  }
-
   function normalizeTrafficFlow(flow) {
     if (!flow || typeof flow !== "object") {
       return { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
@@ -454,18 +529,13 @@
       level: flow.level || "UNKNOWN",
       source: flow.source || "tomtom-flow",
       coverage: flow.coverage || "unavailable",
-      routeDescription: flow.routeDescription || "",
-      trafficStatusValue: flow.trafficStatusValue || "",
-      actualTime: flow.actualTime,
-      expectedTime: flow.expectedTime,
-      currentTravelTime: flow.currentTravelTime ?? flow.actualTime,
-      freeFlowTravelTime: flow.freeFlowTravelTime ?? flow.expectedTime,
-      currentSpeed: flow.currentSpeed,
-      freeFlowSpeed: flow.freeFlowSpeed,
       currentRoadName: flow.currentRoadName || flow.routeDescription || "",
-      delayedTime: flow.delayedTime,
-      delayedPercent: flow.delayedPercent,
-      trendType: flow.trendType || "",
+      currentSpeed: flow.currentSpeed ?? null,
+      freeFlowSpeed: flow.freeFlowSpeed ?? null,
+      currentTravelTime: flow.currentTravelTime ?? null,
+      freeFlowTravelTime: flow.freeFlowTravelTime ?? null,
+      confidence: flow.confidence ?? null,
+      roadClosure: Boolean(flow.roadClosure),
       updated: flow.updated || ""
     };
   }
@@ -695,52 +765,9 @@
       renderTunnelsGrid();
       updateGlobalTheme();
       scheduleTunnelCardRotation();
+      renderMessagePanel();
 
-      const updatedStr = fmtTime(data.updated);
-      if (dom.updated) dom.updated.textContent = `Oppdatert: ${updatedStr}`;
-
-      if (dom.eventCount) {
-        const count = STATE.allMessages.length;
-        dom.eventCount.textContent = count > 0 
-          ? `${count} ${count === 1 ? 'hendelse' : 'hendelser'}`
-          : 'Ingen hendelser';
-      }
-
-      if (dom.items) {
-        if (!STATE.allMessages.length) {
-          dom.items.innerHTML = `
-            <div class="emptyState">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-              </svg>
-              <div>Ingen aktive hendelser</div>
-              <div class="emptyStateText">Alle veier i Stavanger-regionen er åpne</div>
-            </div>`;
-        } else {
-          dom.items.innerHTML = STATE.allMessages.map((m, index) => {
-            const sev = String(m.severity || "").toUpperCase();
-            const cls = sev === "HIGH" || sev === "HIGHEST" ? "bad" : sev === "MEDIUM" ? "warn" : "info";
-            const severityIcon = sev === "HIGH" || sev === "HIGHEST" ?
-              `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>` :
-              sev === "MEDIUM" ?
-              `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>` :
-              `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
-            const sourceLine = m.sourceLabel ? `<div class="itemWhere">${esc(m.sourceLabel)}</div>` : "";
-            const whereLine = m.where ? `<div class="itemWhere">${esc(m.where)}</div>` : "";
-            return `
-              <div class="item ${cls}" style="animation-delay: ${index * 0.1}s">
-                <div class="itemIcon">${severityIcon}</div>
-                <div class="itemMain">
-                  <div class="itemTitle">${esc(m.title)}</div>
-                  ${sourceLine}
-                  ${whereLine}
-                  <div class="itemText">${esc(m.text)}</div>
-                </div>
-              </div>`;
-          }).join("");
-          startAutoScroll();
-        }
-      }
+      if (dom.updated) dom.updated.textContent = `Oppdatert: ${fmtTime(data.updated)}`;
 
       if (data.stale) {
         updateHealth(false, "Ustabil API-kontakt (viser cache fra server)");
@@ -768,6 +795,7 @@
           renderTunnelsGrid();
           updateGlobalTheme();
           scheduleTunnelCardRotation();
+          renderMessagePanel();
           updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");
           if (dom.updated && cached.updated) {
             dom.updated.textContent = `Oppdatert: ${fmtTime(cached.updated)} (cache)`;
@@ -782,6 +810,7 @@
     }
   }
 
+  let _lastTickMinute = -1;
   function tick() {
     const now = new Date();
     if (dom.clock) {
@@ -794,12 +823,18 @@
         weekday: "short", day: "numeric", month: "short"
       });
     }
+    const currentMinute = now.getHours() * 60 + now.getMinutes();
+    if (currentMinute !== _lastTickMinute) {
+      _lastTickMinute = currentMinute;
+      renderRushHourBanner();
+    }
   }
 
   // Initialize
   tick();
   setInterval(tick, CONFIG.clockRate);
   startProgressCountdown();
+  renderRushHourBanner();
   load();
   setInterval(load, CONFIG.refreshRate);
   loadWeather();
