@@ -349,6 +349,8 @@ export async function onRequest(context) {
     }
 
     function isClosureMessage(m) {
+      const rmt = String(m.roadManagementType || "").toLowerCase();
+      if (/roadclosed|carriagewayclosed|carriagewayblocked|laneblocked|roadblocked/.test(rmt)) return true;
       const txt = `${m.title || ""} ${m.text || ""}`.toLowerCase();
       return /stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt);
     }
@@ -390,14 +392,14 @@ export async function onRequest(context) {
     const stavangerOnly = activeMessages.filter(isStavanger);
     const localOnly = stavangerOnly
       .sort((a, b) => new Date(b.time || b.versionTime || 0).getTime() - new Date(a.time || a.versionTime || 0).getTime())
-      .slice(0, 25);
+      .slice(0, 50);
 
     const nowIso = new Date().toISOString();
     const tunnelHistory = { ...seedHistory, ...previousHistory };
     for (const tunnelKey of Object.keys(TUNNEL_REGISTRY)) {
       const latestClosure = localOnly
         .filter((m) => messageMatchesTunnel(m, tunnelKey) && isClosureMessage(m))
-        .map((m) => m.time || nowIso)
+        .map((m) => m.overallStartTime || m.time || nowIso)
         .filter(Boolean)
         .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
@@ -500,7 +502,7 @@ export async function onRequest(context) {
     const historyResponse = new Response(JSON.stringify(payload.tunnelHistory || {}), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "public, max-age=300, s-maxage=300",
+        "Cache-Control": "public, max-age=7200, s-maxage=7200",
       },
     });
 

@@ -211,7 +211,7 @@
       const timeExtra = (curTime && freeTime && curTime !== freeTime)
         ? ` <span class="reisetidNormal">norm. ${freeTime}</span>` : "";
 
-      const lastClosed = STATE.lastClosedAtByTunnel[key];
+      const lastClosed = status !== "STENGT" ? STATE.lastClosedAtByTunnel[key] : null;
       const closureTxt = lastClosed ? `Sist stengt: ${fmtClosedTime(lastClosed)}` : "";
 
       return `
@@ -259,7 +259,7 @@
 
   function updateRightPanel() {
     if (hasAnyRelevantMessages()) {
-      updateRightPanel();
+      renderMessagePanel();
       return;
     }
     if (STATE.flippedTunnelKeys.size > 0) {
@@ -476,6 +476,8 @@
 
 
   function isClosureMessage(msg) {
+    const rmt = String(msg?.roadManagementType || "").toLowerCase();
+    if (/roadclosed|carriagewayclosed|carriagewayblocked|laneblocked|roadblocked/.test(rmt)) return true;
     const txt = `${msg?.title || ""} ${msg?.text || ""}`.toLowerCase();
     return /stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt);
   }
@@ -553,12 +555,6 @@
     const keywordHit = tunnel.keywords.some(keyword => text.includes(keyword));
     if (!keywordHit) return false;
 
-    // Avoid false positives for area names (e.g. "Eiganes") when the event is not tunnel-specific.
-    if (tunnelKey === "eiganes" && text.includes("eiganes") && !text.includes("eiganestunnelen")) {
-      const hasTunnelWord = /tunnel|tunell/.test(text);
-      if (!hasTunnelWord) return false;
-    }
-
     return true;
   }
 
@@ -584,24 +580,16 @@
       .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
     if (relevantMessages.length === 0) return "ÅPEN";
 
-    // Check severity first (most reliable indicator)
     for (const msg of relevantMessages) {
-      const sev = String(msg.severity || "").toUpperCase();
-      if ((sev === "HIGHEST" || sev === "HIGH") && isClosureMessage(msg)) {
-        return "STENGT";
-      }
+      if (isClosureMessage(msg)) return "STENGT";
     }
 
-    // Check for closure/severe disruption patterns
     for (const msg of relevantMessages) {
-      if (isClosureMessage(msg)) {
-        return "STENGT";
-      }
-    }
-
-    // Check for disruptions/warnings (AVVIK)
-    for (const msg of relevantMessages) {
-      const txt = `${msg.title} ${msg.text}`.toLowerCase();
+      const tct = String(msg.trafficConstrictionType || "").toLowerCase();
+      const rmt = String(msg.roadManagementType || "").toLowerCase();
+      if (/lane.*blocked|partial|constrict|narrowing/.test(tct)) return "AVVIK";
+      if (/lanemanagement|contraflow|reversible/.test(rmt)) return "AVVIK";
+      const txt = `${msg.title || ""} ${msg.text || ""}`.toLowerCase();
       if (/kolonne|stans|omkjøring|lysregulering|dirigering|redusert|kø|ulykke|accident|delay|trafikkulykke|framkommelighet/.test(txt)) {
         return "AVVIK";
       }
@@ -703,7 +691,7 @@
       const messages = STATE.messagesByTunnel[tunnelKey] || [];
       const closureCandidates = messages
         .filter((msg) => isClosureMessage(msg))
-        .map((msg) => msg.time || defaultTimeIso)
+        .map((msg) => msg.overallStartTime || msg.time || defaultTimeIso)
         .filter(Boolean)
         .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
@@ -846,8 +834,16 @@
         STATE.tunnelTrafficFlow[tunnelKey] = normalizeTrafficFlow(data.travelFlowByTunnel?.[tunnelKey]);
       });
       if (data.tunnelHistory && typeof data.tunnelHistory === "object") {
-        STATE.lastClosedAtByTunnel = { ...data.tunnelHistory };
-        writeTunnelHistory(STATE.lastClosedAtByTunnel);
+        const merged = { ...STATE.lastClosedAtByTunnel };
+        for (const [key, backendDate] of Object.entries(data.tunnelHistory)) {
+          if (!backendDate) continue;
+          const localDate = merged[key];
+          if (!localDate || new Date(backendDate) > new Date(localDate)) {
+            merged[key] = backendDate;
+          }
+        }
+        STATE.lastClosedAtByTunnel = merged;
+        writeTunnelHistory(merged);
       } else {
         updateTunnelClosureHistory(data.updated);
       }
