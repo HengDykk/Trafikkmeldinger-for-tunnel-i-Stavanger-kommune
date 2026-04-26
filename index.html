@@ -21,14 +21,18 @@
       </div>
       <div class="meta">
         <div class="chip weather" id="weather" style="display:none;">
+          <span id="weatherIcon" class="weatherIcon"></span>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 15.5c0 1.933-1.567 3.5-3.5 3.5H7c-2.761 0-5-2.239-5-5s2.239-5 5-5c0-2.761 2.239-5 5-5s5 2.239 5 5v.5c1.933 0 3.5 1.567 3.5 3.5z"/>
           </svg>
           <span id="weatherText">--°C</span>
+          <span id="weatherWind" class="weatherWind"></span>
         </div>
+        <div class="chip chipDate" id="date"></div>
         <div class="chip" id="clock">--:--:--</div>
         <div class="chip" id="updated">Initialiserer...</div>
       </div>
+      <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
     </header>
     <main class="mainGrid">
       <section class="card tunnelsCard">

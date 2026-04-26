@@ -44,18 +44,25 @@
     lastClosedAtByTunnel: {},
     flippedTunnelKeys: new Set(),
     tunnelFlipIntervalId: null,
-    tunnelFlipResetId: null
+    tunnelFlipResetId: null,
+    progressAnimId: null,
+    scrollAnimId: null,
+    scrollPauseId: null
   };
 
   const dom = {
     app: el("app"),
     updated: el("updated"),
     clock: el("clock"),
+    date: el("date"),
     items: el("items"),
     health: el("health"),
     eventCount: el("eventCount"),
     weather: el("weather"),
     weatherText: el("weatherText"),
+    weatherIcon: el("weatherIcon"),
+    weatherWind: el("weatherWind"),
+    progressFill: el("progressFill"),
     tunnelsGrid: el("tunnelsGrid")
   };
 
@@ -102,6 +109,75 @@
     }
   }
 
+  function startProgressCountdown() {
+    if (!dom.progressFill) return;
+    if (STATE.progressAnimId) cancelAnimationFrame(STATE.progressAnimId);
+    const startTime = Date.now();
+    const duration = CONFIG.refreshRate;
+    const animate = () => {
+      const pct = Math.max(0, 100 - ((Date.now() - startTime) / duration * 100));
+      dom.progressFill.style.width = pct + "%";
+      if (pct > 0) STATE.progressAnimId = requestAnimationFrame(animate);
+    };
+    STATE.progressAnimId = requestAnimationFrame(animate);
+  }
+
+  function stopAutoScroll() {
+    if (STATE.scrollAnimId) { cancelAnimationFrame(STATE.scrollAnimId); STATE.scrollAnimId = null; }
+    if (STATE.scrollPauseId) { clearTimeout(STATE.scrollPauseId); STATE.scrollPauseId = null; }
+  }
+
+  function startAutoScroll() {
+    stopAutoScroll();
+    const items = dom.items;
+    if (!items || items.scrollHeight <= items.clientHeight + 4) return;
+    items.scrollTop = 0;
+    const SPEED = 0.35;
+    const scroll = () => {
+      if (!items) return;
+      if (items.scrollTop + items.clientHeight >= items.scrollHeight - 4) {
+        STATE.scrollPauseId = setTimeout(() => {
+          items.scrollTo({ top: 0, behavior: "smooth" });
+          STATE.scrollPauseId = setTimeout(startAutoScroll, 1800);
+        }, 3500);
+        return;
+      }
+      items.scrollTop += SPEED;
+      STATE.scrollAnimId = requestAnimationFrame(scroll);
+    };
+    STATE.scrollPauseId = setTimeout(() => {
+      STATE.scrollAnimId = requestAnimationFrame(scroll);
+    }, 2500);
+  }
+
+  function getWeatherIcon(symbolCode) {
+    if (!symbolCode) return "";
+    const base = symbolCode.replace(/_(day|night|polartwilight)$/, "");
+    const map = {
+      clearsky: "☀️", fair: "🌤️", partlycloudy: "⛅", cloudy: "☁️",
+      fog: "🌫️", lightfog: "🌫️",
+      lightrain: "🌦️", rain: "🌧️", heavyrain: "🌧️",
+      lightrainshowers: "🌦️", rainshowers: "🌧️", heavyrainshowers: "🌧️",
+      lightsleet: "🌨️", sleet: "🌨️", heavysleet: "🌨️",
+      lightsleetshowers: "🌨️", sleetshowers: "🌨️",
+      lightsnow: "❄️", snow: "❄️", heavysnow: "❄️",
+      lightsnowshowers: "❄️", snowshowers: "❄️",
+      thunder: "⛈️", lightrainandthunder: "⛈️", rainandthunder: "⛈️",
+      heavyrainandthunder: "⛈️", snowandthunder: "⛈️",
+      lightrainshowersandthunder: "⛈️", rainshowersandthunder: "⛈️"
+    };
+    return map[base] || "🌡️";
+  }
+
+  function getTrendArrow(trendType) {
+    switch (String(trendType || "").toUpperCase()) {
+      case "INCREASING": return `<span class="trendArrow trend-up">↑</span>`;
+      case "DECREASING": return `<span class="trendArrow trend-down">↓</span>`;
+      case "STABLE":     return `<span class="trendArrow trend-stable">→</span>`;
+      default: return "";
+    }
+  }
+
   function updateGlobalTheme() {
     if (!dom.app) return;
     const hasClosed = Object.values(STATE.tunnelStatuses).some(s => s === "STENGT");
@@ -135,14 +211,10 @@
   }
 
   function scheduleTunnelCardRotation() {
-    if (STATE.tunnelFlipIntervalId) {
-      clearInterval(STATE.tunnelFlipIntervalId);
-      STATE.tunnelFlipIntervalId = null;
-    }
-    if (STATE.tunnelFlipResetId) {
-      clearTimeout(STATE.tunnelFlipResetId);
-      STATE.tunnelFlipResetId = null;
-    }
+    clearInterval(STATE.tunnelFlipIntervalId);
+    clearTimeout(STATE.tunnelFlipResetId);
+    STATE.tunnelFlipIntervalId = null;
+    STATE.tunnelFlipResetId = null;
 
     const cameraTunnelKeys = Object.keys(TUNNELS).filter(
       (tunnelKey) => getTunnelCameraSources(tunnelKey).length > 0
@@ -153,19 +225,25 @@
 
     if (!cameraTunnelKeys.length) return;
 
-    const flipCards = () => {
-      STATE.flippedTunnelKeys = new Set(cameraTunnelKeys);
+    let index = 0;
+    const SHOW_MS = CONFIG.tunnelCardFlipDurationMs;
+    const STEP_MS = SHOW_MS + 1200;
+
+    const advance = () => {
+      const key = cameraTunnelKeys[index % cameraTunnelKeys.length];
+      index++;
+      STATE.flippedTunnelKeys = new Set([key]);
       renderTunnelsGrid();
 
       STATE.tunnelFlipResetId = setTimeout(() => {
         STATE.flippedTunnelKeys = new Set();
         renderTunnelsGrid();
-      }, CONFIG.tunnelCardFlipDurationMs);
+      }, SHOW_MS);
     };
 
     STATE.tunnelFlipResetId = setTimeout(() => {
-      flipCards();
-      STATE.tunnelFlipIntervalId = setInterval(flipCards, CONFIG.tunnelCardFlipDelayMs + CONFIG.tunnelCardFlipDurationMs);
+      advance();
+      STATE.tunnelFlipIntervalId = setInterval(advance, STEP_MS);
     }, CONFIG.tunnelCardFlipDelayMs);
   }
 
@@ -212,17 +290,25 @@
   async function loadWeather() {
     try {
       const response = await fetch(`${CONFIG.weatherApi}?lat=${CONFIG.weatherLat}&lon=${CONFIG.weatherLon}`, {
-        headers: { 'User-Agent': 'Byfjordtunnelen/2.0 (trafikkmeldinger.pages.dev)' }
+        headers: { "User-Agent": "Byfjordtunnelen/2.0 (trafikkmeldinger.pages.dev)" }
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
       const current = data.properties?.timeseries?.[0];
-      if (current?.data?.instant?.details) {
-        const temp = current.data.instant.details.air_temperature;
+      const details = current?.data?.instant?.details;
+      if (details) {
+        const temp = details.air_temperature;
+        const wind = details.wind_speed;
+        const symbolCode = current.data.next_1_hours?.summary?.symbol_code
+          || current.data.next_6_hours?.summary?.symbol_code;
         if (dom.weatherText) dom.weatherText.textContent = `${Math.round(temp)}°C`;
+        if (dom.weatherIcon) dom.weatherIcon.textContent = getWeatherIcon(symbolCode);
+        if (dom.weatherWind && wind != null) {
+          dom.weatherWind.textContent = `${Math.round(wind)} m/s`;
+        }
         if (dom.weather) dom.weather.style.display = "flex";
       }
-    } catch (err) {
+    } catch {
       if (dom.weather) dom.weather.style.display = "none";
     }
   }
@@ -372,6 +458,11 @@
       trafficStatusValue: flow.trafficStatusValue || "",
       actualTime: flow.actualTime,
       expectedTime: flow.expectedTime,
+      currentTravelTime: flow.currentTravelTime ?? flow.actualTime,
+      freeFlowTravelTime: flow.freeFlowTravelTime ?? flow.expectedTime,
+      currentSpeed: flow.currentSpeed,
+      freeFlowSpeed: flow.freeFlowSpeed,
+      currentRoadName: flow.currentRoadName || flow.routeDescription || "",
       delayedTime: flow.delayedTime,
       delayedPercent: flow.delayedPercent,
       trendType: flow.trendType || "",
@@ -512,6 +603,7 @@
           <span class="trafficFlowBadge ${trafficMeta.className}">
             <span class="trafficFlowIcon" aria-hidden="true">${trafficMeta.icon}</span>
             <span class="trafficFlowLevel">${trafficMeta.level}</span>
+            ${getTrendArrow(trafficFlow.trendType)}
           </span>
         </div>
         <div class="trafficFlowText">${trafficMeta.description}</div>
@@ -559,6 +651,7 @@
   async function load() {
     if (STATE.isRefreshing) return;
     STATE.isRefreshing = true;
+    startProgressCountdown();
 
     try {
       const controller = new AbortController();
@@ -627,7 +720,7 @@
           dom.items.innerHTML = STATE.allMessages.map((m, index) => {
             const sev = String(m.severity || "").toUpperCase();
             const cls = sev === "HIGH" || sev === "HIGHEST" ? "bad" : sev === "MEDIUM" ? "warn" : "info";
-            const severityIcon = sev === "HIGH" || sev === "HIGHEST" ? 
+            const severityIcon = sev === "HIGH" || sev === "HIGHEST" ?
               `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>` :
               sev === "MEDIUM" ?
               `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>` :
@@ -645,6 +738,7 @@
                 </div>
               </div>`;
           }).join("");
+          startAutoScroll();
         }
       }
 
@@ -689,9 +783,15 @@
   }
 
   function tick() {
+    const now = new Date();
     if (dom.clock) {
-      dom.clock.textContent = new Date().toLocaleTimeString("no-NO", { 
+      dom.clock.textContent = now.toLocaleTimeString("no-NO", {
         hour: "2-digit", minute: "2-digit", second: "2-digit"
+      });
+    }
+    if (dom.date) {
+      dom.date.textContent = now.toLocaleDateString("no-NO", {
+        weekday: "short", day: "numeric", month: "short"
       });
     }
   }
@@ -699,6 +799,7 @@
   // Initialize
   tick();
   setInterval(tick, CONFIG.clockRate);
+  startProgressCountdown();
   load();
   setInterval(load, CONFIG.refreshRate);
   loadWeather();
