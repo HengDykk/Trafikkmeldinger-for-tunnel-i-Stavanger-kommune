@@ -444,7 +444,9 @@
   function getAllCameraSources() {
     const t = Date.now();
     const cameras = [];
-    for (const [, tunnel] of Object.entries(TUNNELS)) {
+    const cameraOrder = ["hundvag", "byfjord", "eiganes"];
+    for (const tunnelKey of cameraOrder) {
+      const tunnel = TUNNELS[tunnelKey];
       if (!Array.isArray(tunnel.cameras)) continue;
       for (const cam of tunnel.cameras) {
         cameras.push({ ...cam, tunnelName: tunnel.name, src: `/api/cam?id=${encodeURIComponent(cam.id)}&t=${t}` });
