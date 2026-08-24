@@ -20,7 +20,7 @@
   };
 
   const TUNNELS = {
-    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, speedLimit: 80, cameras: [{ id: "byfjord_nord", label: "Mot Byfjordtunnelen" }, { id: "byfjord_sor", label: "Mot Stavanger" }] },
+    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, speedLimit: 80, cameras: [{ id: "byfjord_nord", label: "Mot Stavanger/Randaberg" }, { id: "byfjord_sor", label: "Mot innløpet retning nord" }] },
     mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, speedLimit: 80, cameras: [] },
     eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3700, speedLimit: 80, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
     hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 5700, speedLimit: 80 },
