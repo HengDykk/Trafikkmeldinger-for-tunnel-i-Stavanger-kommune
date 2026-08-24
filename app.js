@@ -13,9 +13,7 @@
     maxRetries: 3,
     apiTimeoutMs: 10000,
     offlineCacheKey: "byfjord:lastPayload",
-    tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel",
-    tunnelCardFlipDelayMs: 10000,
-    tunnelCardFlipDurationMs: 5000
+    tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel"
   };
 
   const TUNNELS = {
@@ -42,9 +40,6 @@
     messagesByTunnel: {},
     scheduledRetryId: null,
     lastClosedAtByTunnel: {},
-    flippedTunnelKeys: new Set(),
-    tunnelFlipIntervalId: null,
-    tunnelFlipResetId: null,
     progressAnimId: null,
     scrollAnimId: null,
     scrollPauseId: null,
@@ -64,7 +59,15 @@
     weatherIcon: el("weatherIcon"),
     weatherWind: el("weatherWind"),
     progressFill: el("progressFill"),
-    tunnelsGrid: el("tunnelsGrid")
+    tunnelsGrid: el("tunnelsGrid"),
+    overviewSignal: el("overviewSignal"),
+    overviewTitle: el("overviewTitle"),
+    overviewSub: el("overviewSub"),
+    summaryFlow: el("summaryFlow"),
+    summaryFlowDetail: el("summaryFlowDetail"),
+    summaryEvents: el("summaryEvents"),
+    summaryEventDetail: el("summaryEventDetail"),
+    summaryCoverage: el("summaryCoverage")
   };
 
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
@@ -175,18 +178,26 @@
     return `<div class="msgItem ${cls}"><span class="msgIcon ${cls}">${icon}</span><div class="msgBody"><div class="msgText">${body}</div>${source}</div></div>`;
   }
 
-  function hasAnyRelevantMessages() {
-    if (Object.values(STATE.messagesByTunnel).some(msgs => msgs.some(m => isMessageActiveNow(m)))) return true;
+  function getRelevantEventCount() {
+    const relevant = new Set();
+    Object.values(STATE.messagesByTunnel).forEach(msgs =>
+      msgs.filter(isMessageActiveNow).forEach(message => relevant.add(msgKey(message)))
+    );
     const tunnelMsgKeys = new Set();
     Object.values(STATE.messagesByTunnel).forEach(msgs =>
       msgs.filter(m => isMessageActiveNow(m)).forEach(m => tunnelMsgKeys.add(msgKey(m)))
     );
-    return STATE.allMessages.some(m => {
-      if (!isMessageActiveNow(m)) return false;
-      if (tunnelMsgKeys.has(msgKey(m))) return false;
-      const sev = String(m.severity || "").toUpperCase();
-      return sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM";
+    STATE.allMessages.forEach(message => {
+      if (!isMessageActiveNow(message)) return;
+      if (tunnelMsgKeys.has(msgKey(message))) return;
+      const sev = String(message.severity || "").toUpperCase();
+      if (sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM") relevant.add(msgKey(message));
     });
+    return relevant.size;
+  }
+
+  function hasAnyRelevantMessages() {
+    return getRelevantEventCount() > 0;
   }
 
   function renderIdlePanel() {
@@ -263,15 +274,6 @@
       stopCameraRefresh();
       renderMessagePanel();
       return;
-    }
-    if (STATE.flippedTunnelKeys.size > 0) {
-      const key = [...STATE.flippedTunnelKeys][0];
-      const cameras = getTunnelCameraSources(key);
-      if (cameras.length > 0) {
-        stopCameraRefresh();
-        renderSpotlightCamera(key, cameras);
-        return;
-      }
     }
     renderStaticCameraPanel();
   }
@@ -476,64 +478,27 @@
     const cameras = getAllCameraSources();
     if (!cameras.length) { renderIdlePanel(); return; }
 
-    if (dom.eventCount) dom.eventCount.textContent = "Veikamera — Live";
+    if (dom.eventCount) dom.eventCount.innerHTML = `<span class="liveDot"></span>Direktebilder`;
 
     if (dom.items.querySelector(".staticCameraPanel")) {
       if (!STATE.cameraRefreshId) startCameraRefresh();
       return;
     }
 
-    const figures = cameras.map(cam => `
+    const figures = cameras.map((cam, index) => `
       <figure class="staticCamFigure">
         <img class="staticCamImage" src="${esc(cam.src)}" alt="${esc(cam.label)}"
           referrerpolicy="no-referrer" data-cam-id="${esc(cam.id)}">
-        <figcaption class="staticCamCaption">${esc(cam.tunnelName)} — ${esc(cam.label)}</figcaption>
+        <figcaption class="staticCamCaption">
+          <span>${esc(cam.tunnelName)}</span>
+          <small>${esc(cam.label)}</small>
+        </figcaption>
+        ${index === 0 ? `<span class="cameraLiveBadge"><i></i>Live</span>` : ""}
       </figure>`).join("");
 
     dom.items.innerHTML = `<div class="staticCameraPanel">${figures}</div>`;
     startCameraRefresh();
   }
-
-  function scheduleTunnelCardRotation() {
-    clearInterval(STATE.tunnelFlipIntervalId);
-    clearTimeout(STATE.tunnelFlipResetId);
-    STATE.tunnelFlipIntervalId = null;
-    STATE.tunnelFlipResetId = null;
-
-    const cameraTunnelKeys = Object.keys(TUNNELS).filter(
-      (tunnelKey) => getTunnelCameraSources(tunnelKey).length > 0
-    );
-
-    STATE.flippedTunnelKeys = new Set();
-    renderTunnelsGrid();
-    updateRightPanel();
-
-    if (!cameraTunnelKeys.length) return;
-
-    let index = 0;
-    const SHOW_MS = CONFIG.tunnelCardFlipDurationMs;
-    const STEP_MS = SHOW_MS + 1200;
-
-    const advance = () => {
-      const key = cameraTunnelKeys[index % cameraTunnelKeys.length];
-      index++;
-      STATE.flippedTunnelKeys = new Set([key]);
-      renderTunnelsGrid();
-      updateRightPanel();
-
-      STATE.tunnelFlipResetId = setTimeout(() => {
-        STATE.flippedTunnelKeys = new Set();
-        renderTunnelsGrid();
-        updateRightPanel();
-      }, SHOW_MS);
-    };
-
-    STATE.tunnelFlipResetId = setTimeout(() => {
-      advance();
-      STATE.tunnelFlipIntervalId = setInterval(advance, STEP_MS);
-    }, CONFIG.tunnelCardFlipDelayMs);
-  }
-
 
   function isClosureMessage(msg) {
     const rmt = String(msg?.roadManagementType || "").toLowerCase();
@@ -744,6 +709,51 @@
     return parts.join(" ");
   }
 
+  function getDelaySeconds(flow) {
+    const current = Number(flow?.currentTravelTime);
+    const free = Number(flow?.freeFlowTravelTime);
+    if (!Number.isFinite(current) || !Number.isFinite(free)) return null;
+    return Math.max(0, Math.round(current - free));
+  }
+
+  function formatDelay(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 15) return "Ingen forsinkelse";
+    if (seconds < 60) return `+${seconds} sek`;
+    return `+${Math.ceil(seconds / 60)} min`;
+  }
+
+  function renderOverview() {
+    const statuses = Object.values(STATE.tunnelStatuses);
+    const openCount = statuses.filter(status => status === "ÅPEN").length;
+    const closedCount = statuses.filter(status => status === "STENGT").length;
+    const warningCount = statuses.filter(status => status === "AVVIK").length;
+    const flows = Object.values(STATE.tunnelTrafficFlow).map(normalizeTrafficFlow);
+    const measured = flows.filter(flow => flow.level !== "UNKNOWN");
+    const redCount = flows.filter(flow => flow.level === "RED").length;
+    const yellowCount = flows.filter(flow => flow.level === "YELLOW").length;
+    const activeEvents = getRelevantEventCount();
+
+    const tone = closedCount > 0 ? "bad" : warningCount > 0 || redCount > 0 || yellowCount > 0 ? "warn" : "good";
+    const signal = closedCount > 0 ? "Kritisk avvik" : warningCount > 0 ? "Trafikkavvik" : "Normal drift";
+    dom.overviewSignal.className = `overviewSignal ${tone}`;
+    dom.overviewSignal.innerHTML = `<span class="overviewDot"></span>${signal}`;
+    dom.overviewTitle.textContent = closedCount > 0
+      ? `${closedCount} ${closedCount === 1 ? "tunnel er" : "tunneler er"} stengt`
+      : warningCount > 0
+        ? `${warningCount} ${warningCount === 1 ? "tunnel har" : "tunneler har"} avvik`
+        : `${openCount} av ${statuses.length} tunneler er åpne`;
+    dom.overviewSub.textContent = closedCount || warningCount
+      ? "Se berørte tunneler og aktive meldinger nedenfor"
+      : "Ingen registrerte stengninger eller tunnelavvik";
+
+    dom.summaryFlow.textContent = redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
+    dom.summaryFlow.className = redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
+    dom.summaryFlowDetail.textContent = redCount || yellowCount ? `${redCount + yellowCount} målinger med forsinkelse` : "Flyt nær normalnivå";
+    dom.summaryEvents.textContent = String(activeEvents);
+    dom.summaryEventDetail.textContent = activeEvents === 1 ? "relevant hendelse" : "relevante hendelser";
+    dom.summaryCoverage.textContent = `${measured.length}/${statuses.length}`;
+  }
+
   function updateTunnelClosureHistory(defaultTimeIso) {
     const nextHistory = { ...STATE.lastClosedAtByTunnel };
 
@@ -787,69 +797,40 @@
         status === "ÅPEN" ? "Åpen" :
         status === "STENGT" ? "Stengt" : "Avvik";
       
-      const tunnelMessages = STATE.messagesByTunnel[key] || [];
-      const reason = tunnelMessages.length > 0 
+      const tunnelMessages = (STATE.messagesByTunnel[key] || []).filter(isMessageActiveNow);
+      const reason = tunnelMessages.length > 0
         ? (tunnelMessages[0].text || tunnelMessages[0].title)
-        : "Ingen merknader";
+        : "Ingen aktive meldinger";
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
-      const tunnelMetaText = getTunnelMetaText(tunnelMessages);
-      const cameras = getTunnelCameraSources(key);
-      const isFlipped = cameras.length > 0 && STATE.flippedTunnelKeys.has(key);
-      const frontHtml = `
-        <div class="tunnelItemHeader">
-          <div class="tunnelItemStatus">
-            <div class="statusDot ${statusClass}"></div>
-            <span class="statusLabel">${statusText}</span>
-          </div>
-          <span class="tunnelTime">${tunnelMetaText}</span>
-        </div>
-        <h3 class="tunnelItemName">${tunnel.name}</h3>
-        ${lengthText ? `<div class="tunnelItemLength">${lengthText}</div>` : ''}
-        <div class="trafficFlowRow">
-          <span class="trafficFlowLabel">Trafikkflyt</span>
-          <span class="trafficFlowBadge ${trafficMeta.className}">
-            <span class="trafficFlowIcon" aria-hidden="true">${trafficMeta.icon}</span>
-            <span class="trafficFlowLevel">${trafficMeta.level}</span>
-            ${getTrendArrow(trafficFlow.trendType)}
-          </span>
-        </div>
-        <div class="trafficFlowText">${trafficMeta.description}</div>
-        <div class="trafficFlowText trafficFlowDataText">${esc(getTrafficFlowDetails(trafficFlow))}</div>
-        <div class="tunnelItemReason">${esc(reason)}</div>
-      `;
-      const backHtml = cameras.length
-        ? `
-          <div class="tunnelCameraHeader">
-            <span class="tunnelCameraTitle">Kamerabilder</span>
-            <span class="tunnelCameraMeta">${tunnel.name}</span>
-          </div>
-          <div class="tunnelCameraGrid ${cameras.length === 1 ? "single" : ""}">
-            ${cameras.map((camera) => `
-              <figure class="tunnelCameraFigure">
-                <img class="tunnelCameraImage" src="${esc(camera.src)}" alt="${esc(camera.label)}" loading="lazy" referrerpolicy="no-referrer">
-                <figcaption class="tunnelCameraCaption">${esc(camera.label)}</figcaption>
-              </figure>
-            `).join("")}
-          </div>
-        `
-        : `
-          <div class="tunnelCameraEmpty">
-            <div class="tunnelCameraTitle">Ingen kamerabilder</div>
-          </div>
-        `;
+      const speed = Number(trafficFlow.currentSpeed);
+      const normalSpeed = Number(trafficFlow.freeFlowSpeed);
+      const travelTime = fmtDurationSeconds(trafficFlow.currentTravelTime);
+      const delay = getDelaySeconds(trafficFlow);
+      const hasFlow = Number.isFinite(speed) || Boolean(travelTime);
 
       return `
-        <div class="tunnelItem ${statusClass} ${isFlipped ? "is-flipped" : ""} ${cameras.length ? "has-camera" : ""}">
-          <div class="tunnelItemInner">
-            <div class="tunnelItemFace tunnelItemFront">
-              ${frontHtml}
-            </div>
-            <div class="tunnelItemFace tunnelItemBack">
-              ${backHtml}
+        <article class="tunnelItem ${statusClass}">
+          <div class="tunnelTopline">
+            <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
+            <span class="flowState ${trafficMeta.className}"><i></i>${trafficMeta.level} trafikk</span>
+          </div>
+          <div class="tunnelIdentity">
+            <div>
+              <h3 class="tunnelItemName">${tunnel.name}</h3>
+              <span class="tunnelItemLength">${lengthText}</span>
             </div>
           </div>
-        </div>
+          <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
+            <div class="tunnelMetric"><span>Fart nå</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>Normal fart</span><strong>${Number.isFinite(normalSpeed) ? `${Math.round(normalSpeed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>Reisetid</span><strong>${travelTime || "–"}</strong></div>
+          </div>
+          <div class="tunnelBottomline">
+            <span class="delay ${trafficMeta.className}">${formatDelay(delay)}</span>
+            <span class="tunnelReason">${esc(reason)}</span>
+          </div>
+        </article>
       `;
     }).join("");
     
@@ -909,6 +890,7 @@
       }
 
       renderTunnelsGrid();
+      renderOverview();
       updateGlobalTheme();
       updateRightPanel();
 
@@ -938,6 +920,7 @@
           });
           updateTunnelClosureHistory(cached.updated);
           renderTunnelsGrid();
+          renderOverview();
           updateGlobalTheme();
           updateRightPanel();
           updateHealth(false, "Ingen forbindelse til API (viser sist lagrede data)");

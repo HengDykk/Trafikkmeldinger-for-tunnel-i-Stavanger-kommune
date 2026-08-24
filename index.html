@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Trafikkstatus — Stavanger Tunneler</title>
+  <title>Tunneltrafikk Stavanger</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -15,8 +15,8 @@
       <div class="brand">
         <div class="hdot" id="headerDot"></div>
         <div class="brandText">
-          <div class="title">Trafikkstatus Tunneler</div>
-          <div class="sub">Stavanger-regionen</div>
+          <div class="title">Tunneltrafikk Stavanger</div>
+          <div class="sub">Sanntidsstatus for åtte tunneler</div>
         </div>
       </div>
       <div class="meta">
@@ -34,16 +34,51 @@
       </div>
       <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
     </header>
+    <section class="overview" aria-label="Samlet trafikkstatus">
+      <div class="overviewLead">
+        <div class="overviewSignal" id="overviewSignal"><span class="overviewDot"></span>Normal drift</div>
+        <div class="overviewTitle" id="overviewTitle">Laster tunnelstatus…</div>
+        <div class="overviewSub" id="overviewSub">Henter data fra Statens vegvesen og TomTom</div>
+      </div>
+      <div class="overviewMetrics">
+        <div class="overviewMetric">
+          <span class="overviewMetricLabel">Trafikkflyt</span>
+          <strong id="summaryFlow">Laster…</strong>
+          <span id="summaryFlowDetail">Sanntidsmålinger</span>
+        </div>
+        <div class="overviewMetric">
+          <span class="overviewMetricLabel">Hendelser</span>
+          <strong id="summaryEvents">–</strong>
+          <span id="summaryEventDetail">Aktive meldinger</span>
+        </div>
+        <div class="overviewMetric">
+          <span class="overviewMetricLabel">Datadekning</span>
+          <strong id="summaryCoverage">–</strong>
+          <span>tunneler med måling</span>
+        </div>
+      </div>
+    </section>
     <main class="mainGrid">
       <section class="card tunnelsCard">
         <div class="cardHeader">
-          <h2 class="h2">Tunnelstatus</h2>
+          <div>
+            <h2 class="h2">Tunneler</h2>
+            <div class="sectionSub">Status, fart og beregnet reisetid nå</div>
+          </div>
+          <div class="legend" aria-label="Forklaring">
+            <span><i class="legendDot goodDot"></i>Åpen</span>
+            <span><i class="legendDot warnDot"></i>Avvik</span>
+            <span><i class="legendDot badDot"></i>Stengt</span>
+          </div>
         </div>
         <div class="tunnelsGrid" id="tunnelsGrid"></div>
       </section>
       <section class="card messagesCard">
         <div class="cardHeader">
-          <h2 class="h2">Trafikkbilde</h2>
+          <div>
+            <h2 class="h2">Live trafikkbilde</h2>
+            <div class="sectionSub">Utvalgte veikameraer i Stavanger</div>
+          </div>
           <div class="hint" id="eventCount">0 hendelser</div>
         </div>
         <div id="rushHourBanner" class="rushHourBanner rush-quiet">
@@ -59,11 +94,11 @@
     </main>
     <footer class="foot">
       <div class="footLeft">
-        <div class="note">Kilde: Statens Vegvesen (DATEX II)</div>
+        <div class="note">Kilder: Statens vegvesen, Politiet og TomTom</div>
         <div class="note" id="health"><span class="healthDot"></span>System status: OK</div>
       </div>
       <div class="footRight">
-        <div class="note">Auto-oppdaterer hvert minutt</div>
+        <div class="note">Data hvert minutt · kamera hvert 30. sekund</div>
       </div>
     </footer>
   </div>
