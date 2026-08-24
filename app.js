@@ -55,7 +55,8 @@
     clock: el("clock"),
     date: el("date"),
     items: el("items"),
-    health: el("health"),
+    vegvesenHealth: el("vegvesenHealth"),
+    tomtomHealth: el("tomtomHealth"),
     eventCount: el("eventCount"),
     weather: el("weather"),
     weatherText: el("weatherText"),
@@ -568,10 +569,29 @@
     }
   }
 
+  function updateSourceHealth(element, sourceName, status) {
+    if (!element) return;
+    const state = ["ok", "degraded", "down"].includes(status?.state) ? status.state : "down";
+    const dotClass = state === "ok" ? "healthy" : state === "degraded" ? "warning" : "unhealthy";
+    const label = status?.label || (state === "ok" ? "OK" : "Utilgjengelig");
+    const dot = document.createElement("span");
+    dot.className = `healthDot ${dotClass}`;
+    element.replaceChildren(dot, document.createTextNode(`${sourceName}: ${label}`));
+    element.title = status?.detail || "";
+  }
+
+  function updateSourceStatuses(statuses) {
+    updateSourceHealth(dom.vegvesenHealth, "Vegvesen", statuses?.vegvesen);
+    updateSourceHealth(dom.tomtomHealth, "TomTom", statuses?.tomtom);
+  }
+
   function updateHealth(isHealthy, message) {
-    if (dom.health) {
-      dom.health.innerHTML = `<span class="healthDot ${isHealthy ? 'healthy' : 'unhealthy'}"></span>${message || 'System status: OK'}`;
-    }
+    const status = {
+      state: isHealthy ? "ok" : "down",
+      label: isHealthy ? "OK" : "Utilgjengelig",
+      detail: message || "",
+    };
+    updateSourceStatuses({ vegvesen: status, tomtom: status });
   }
 
   function isRelevantToTunnel(message, tunnelKey) {
@@ -936,9 +956,15 @@
       if (dom.updated) dom.updated.textContent = `Oppdatert: ${fmtTime(data.updated)}`;
 
       if (data.stale) {
-        updateHealth(false, "Ustabil API-kontakt (viser cache fra server)");
+        updateSourceStatuses(data.sourceStatus || {
+          vegvesen: { state: "degraded", label: "Mellomlagret", detail: "Viser sist kjente data" },
+          tomtom: { state: "degraded", label: "Mellomlagret", detail: "Viser sist kjente data" },
+        });
       } else {
-        updateHealth(true, "System status: OK");
+        updateSourceStatuses(data.sourceStatus || {
+          vegvesen: { state: "ok", label: "OK" },
+          tomtom: { state: "ok", label: "OK" },
+        });
       }
 
     } catch (err) {

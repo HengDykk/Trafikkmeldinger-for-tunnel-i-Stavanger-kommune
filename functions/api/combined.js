@@ -236,6 +236,60 @@ async function fetchTomTomTrafficData(env, timeoutMs) {
   return Object.fromEntries(entries);
 }
 
+function getTomTomSourceStatus(travelFlowByTunnel) {
+  const points = Object.values(travelFlowByTunnel || {}).flatMap((flow) =>
+    Array.isArray(flow?.segments) ? flow.segments : [flow]
+  ).filter(Boolean);
+  const available = points.filter((flow) => flow.level && flow.level !== "UNKNOWN");
+  const stale = available.filter((flow) => flow.coverage === "stale-segment-point");
+  const latestUpdate = available
+    .map((flow) => flow.updated)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || "";
+
+  if (!available.length) {
+    return {
+      state: "down",
+      label: "Utilgjengelig",
+      detail: "Ingen TomTom-målepunkter svarer",
+      availablePoints: 0,
+      totalPoints: points.length,
+      updated: "",
+    };
+  }
+
+  if (stale.length) {
+    return {
+      state: "degraded",
+      label: "Mellomlagret",
+      detail: `${stale.length} av ${points.length} målepunkter viser sist kjente verdi`,
+      availablePoints: available.length,
+      totalPoints: points.length,
+      updated: latestUpdate,
+    };
+  }
+
+  if (available.length < points.length) {
+    return {
+      state: "degraded",
+      label: "Delvis",
+      detail: `${available.length} av ${points.length} målepunkter svarer`,
+      availablePoints: available.length,
+      totalPoints: points.length,
+      updated: latestUpdate,
+    };
+  }
+
+  return {
+    state: "ok",
+    label: "OK",
+    detail: `${available.length} av ${points.length} målepunkter svarer`,
+    availablePoints: available.length,
+    totalPoints: points.length,
+    updated: latestUpdate,
+  };
+}
+
 function normalizeLookupText(value) {
   return String(value || "")
     .toLowerCase()
@@ -542,7 +596,22 @@ export async function onRequest(context) {
       if (cached) {
         const payload = await cached.json();
         return json(
-          { ...payload, tunnelHistory: payload.tunnelHistory || previousHistory || seedHistory || {}, source: "stale-cache", stale: true, staleReason: `Upstream ${res.status}` },
+          {
+            ...payload,
+            tunnelHistory: payload.tunnelHistory || previousHistory || seedHistory || {},
+            sourceStatus: {
+              ...(payload.sourceStatus || {}),
+              vegvesen: {
+                state: "degraded",
+                label: "Mellomlagret",
+                detail: `DATEX svarer med HTTP ${res.status}; viser sist kjente data`,
+                updated: payload.updated || "",
+              },
+            },
+            source: "stale-cache",
+            stale: true,
+            staleReason: `Upstream ${res.status}`,
+          },
           200,
           "public, max-age=10, s-maxage=20, stale-while-revalidate=120"
         );
@@ -571,6 +640,15 @@ export async function onRequest(context) {
 
     const payload = {
       ...buildPayload([...messagesClean, ...policeMessages], travelFlowByTunnel, previousHistory || {}, seedHistory),
+      sourceStatus: {
+        vegvesen: {
+          state: "ok",
+          label: "OK",
+          detail: "DATEX-data mottatt fra Statens vegvesen",
+          updated: new Date().toISOString(),
+        },
+        tomtom: getTomTomSourceStatus(travelFlowByTunnel),
+      },
       source: "live",
       stale: false,
     };
@@ -601,6 +679,15 @@ export async function onRequest(context) {
         {
           ...payload,
           tunnelHistory: payload.tunnelHistory || previousHistory || seedHistory || {},
+          sourceStatus: {
+            ...(payload.sourceStatus || {}),
+            vegvesen: {
+              state: "degraded",
+              label: "Mellomlagret",
+              detail: "DATEX-kontakten feilet; viser sist kjente data",
+              updated: payload.updated || "",
+            },
+          },
           source: "stale-cache",
           stale: true,
           staleReason: String(e && e.name ? e.name : "upstream-error"),
