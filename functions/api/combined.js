@@ -25,6 +25,7 @@ const TUNNEL_REGISTRY = {
 const TOMTOM_FLOW_POINTS = {
   byfjord: { lat: 59.0248, lon: 5.7265 },
   mastrafjord: { lat: 59.0797, lon: 5.6823 },
+  // Separate E39 tubes north of the interchange, away from the Hundvag and Madlaveien ramps.
   eiganes: [
     { id: "northbound", label: "Mot Bergen", lat: 58.9704066, lon: 5.7126760 },
     { id: "southbound", label: "Mot sentrum", lat: 58.9704205, lon: 5.7117078 },
