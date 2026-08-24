@@ -1,8 +1,11 @@
 (() => {
   const el = (id) => document.getElementById(id);
+  const previewApiOrigin = location.hostname.endsWith(".trafikkmeldinger.pages.dev")
+    ? "https://trafikkmeldinger.pages.dev"
+    : "";
 
   const CONFIG = {
-    api: "/api/combined?region=stavanger",
+    api: `${previewApiOrigin}/api/combined?region=stavanger`,
     weatherApi: "https://api.met.no/weatherapi/locationforecast/2.0/compact",
     weatherLat: 59.0369,
     weatherLon: 5.7331,
