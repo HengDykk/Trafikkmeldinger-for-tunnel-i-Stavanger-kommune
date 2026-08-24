@@ -43,6 +43,9 @@ const TOMTOM_FLOW_POINTS = {
   storhaug: { lat: 58.961506, lon: 5.752038 },
 };
 
+const TOMTOM_REFRESH_MS = 15 * 60 * 1000;
+const TOMTOM_STALE_CACHE_SECONDS = 6 * 60 * 60;
+
 function normalizeHistorySeed(seed) {
   const out = {};
   for (const [key, value] of Object.entries(seed || {})) {
@@ -98,13 +101,29 @@ function buildUnknownTomTomFlow(coverage = "unavailable") {
 async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const cache = caches.default;
+  const pointId = point.id || tunnelKey;
+  const cacheKey = new Request(
+    `https://trafikkmeldinger.internal/tomtom-flow/${encodeURIComponent(tunnelKey)}/${encodeURIComponent(pointId)}.json`,
+    { method: "GET" }
+  );
   const unknownForPoint = (coverage) => ({
     ...buildUnknownTomTomFlow(coverage),
-    segmentId: point.id || tunnelKey,
+    segmentId: pointId,
     segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
   });
+  let cachedFlow = null;
 
   try {
+    const cachedResponse = await cache.match(cacheKey);
+    if (cachedResponse) {
+      cachedFlow = await cachedResponse.json().catch(() => null);
+      const cachedAt = new Date(cachedFlow?.updated || "").getTime();
+      if (cachedFlow && Number.isFinite(cachedAt) && Date.now() - cachedAt < TOMTOM_REFRESH_MS) {
+        return cachedFlow;
+      }
+    }
+
     const url =
       `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/14/json?key=${encodeURIComponent(apiKey)}` +
       `&point=${point.lat},${point.lon}&unit=KMPH`;
@@ -116,25 +135,25 @@ async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
         Accept: "application/json",
       },
       cf: {
-        cacheTtl: 30,
+        cacheTtl: Math.floor(TOMTOM_REFRESH_MS / 1000),
         cacheEverything: true,
       },
     });
 
     if (!response.ok) {
-      return unknownForPoint("api-error");
+      return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("api-error");
     }
 
     const payload = await response.json().catch(() => null);
     const segment = payload?.flowSegmentData;
     if (!segment || typeof segment !== "object") {
-      return unknownForPoint("missing-segment");
+      return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("missing-segment");
     }
 
-    return {
+    const flow = {
       source: "tomtom-flow",
       coverage: "segment-point",
-      segmentId: point.id || tunnelKey,
+      segmentId: pointId,
       segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
       level: classifyTomTomFlow(segment),
       routeDescription: segment.currentRoadName || TUNNEL_REGISTRY[tunnelKey]?.name || "",
@@ -147,8 +166,20 @@ async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
       roadClosure: Boolean(segment.roadClosure),
       updated: new Date().toISOString(),
     };
+
+    await cache.put(
+      cacheKey,
+      new Response(JSON.stringify(flow), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": `public, max-age=${TOMTOM_STALE_CACHE_SECONDS}, s-maxage=${TOMTOM_STALE_CACHE_SECONDS}`,
+        },
+      })
+    );
+
+    return flow;
   } catch {
-    return unknownForPoint("request-failed");
+    return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("request-failed");
   } finally {
     clearTimeout(timeoutId);
   }
