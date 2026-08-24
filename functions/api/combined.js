@@ -25,7 +25,10 @@ const TUNNEL_REGISTRY = {
 const TOMTOM_FLOW_POINTS = {
   byfjord: { lat: 59.0248, lon: 5.7265 },
   mastrafjord: { lat: 59.0797, lon: 5.6823 },
-  eiganes: { lat: 58.9628, lon: 5.7178 },
+  eiganes: [
+    { id: "northbound", label: "Mot Bergen", lat: 58.9704066, lon: 5.7126760 },
+    { id: "southbound", label: "Mot sentrum", lat: 58.9704205, lon: 5.7117078 },
+  ],
   hundvag: { lat: 58.9869, lon: 5.7488 },
   ryfast: { lat: 58.9778, lon: 5.7754 },
   finnoy: { lat: 59.1705, lon: 5.8443 },
@@ -88,6 +91,11 @@ function buildUnknownTomTomFlow(coverage = "unavailable") {
 async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const unknownForPoint = (coverage) => ({
+    ...buildUnknownTomTomFlow(coverage),
+    segmentId: point.id || tunnelKey,
+    segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
+  });
 
   try {
     const url =
@@ -107,18 +115,20 @@ async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
     });
 
     if (!response.ok) {
-      return buildUnknownTomTomFlow("api-error");
+      return unknownForPoint("api-error");
     }
 
     const payload = await response.json().catch(() => null);
     const segment = payload?.flowSegmentData;
     if (!segment || typeof segment !== "object") {
-      return buildUnknownTomTomFlow("missing-segment");
+      return unknownForPoint("missing-segment");
     }
 
     return {
       source: "tomtom-flow",
       coverage: "segment-point",
+      segmentId: point.id || tunnelKey,
+      segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
       level: classifyTomTomFlow(segment),
       routeDescription: segment.currentRoadName || TUNNEL_REGISTRY[tunnelKey]?.name || "",
       currentRoadName: segment.currentRoadName || "",
@@ -131,10 +141,35 @@ async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
       updated: new Date().toISOString(),
     };
   } catch {
-    return buildUnknownTomTomFlow("request-failed");
+    return unknownForPoint("request-failed");
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function getTomTomFlowScore(flow) {
+  const levelScore = { UNKNOWN: 0, GREEN: 1, YELLOW: 2, RED: 3 }[flow?.level] || 0;
+  const currentSpeed = Number(flow?.currentSpeed);
+  const freeFlowSpeed = Number(flow?.freeFlowSpeed);
+  const speedLoss = Number.isFinite(currentSpeed) && Number.isFinite(freeFlowSpeed) && freeFlowSpeed > 0
+    ? Math.max(0, 1 - currentSpeed / freeFlowSpeed)
+    : 0;
+  return levelScore * 10 + speedLoss;
+}
+
+function aggregateTomTomFlows(flows) {
+  const segments = flows.filter(Boolean);
+  const available = segments.filter((flow) => flow.level !== "UNKNOWN");
+  if (!available.length) {
+    return { ...buildUnknownTomTomFlow("multi-segment-unavailable"), segments };
+  }
+
+  const representative = [...available].sort((a, b) => getTomTomFlowScore(b) - getTomTomFlowScore(a))[0];
+  return {
+    ...representative,
+    coverage: "multi-segment",
+    segments,
+  };
 }
 
 async function fetchTomTomTrafficData(env, timeoutMs) {
@@ -147,11 +182,15 @@ async function fetchTomTomTrafficData(env, timeoutMs) {
 
   const entries = await Promise.all(
     Object.entries(TUNNEL_REGISTRY).map(async ([tunnelKey]) => {
-      const point = TOMTOM_FLOW_POINTS[tunnelKey];
-      if (!point) {
+      const configuredPoints = TOMTOM_FLOW_POINTS[tunnelKey];
+      if (!configuredPoints) {
         return [tunnelKey, buildUnknownTomTomFlow("unconfigured-point")];
       }
-      const flow = await fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs);
+      const points = Array.isArray(configuredPoints) ? configuredPoints : [configuredPoints];
+      const flows = await Promise.all(
+        points.map((point) => fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs))
+      );
+      const flow = points.length > 1 ? aggregateTomTomFlows(flows) : flows[0];
       return [tunnelKey, flow];
     })
   );

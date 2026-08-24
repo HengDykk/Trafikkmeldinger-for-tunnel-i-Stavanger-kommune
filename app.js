@@ -638,6 +638,7 @@
       freeFlowTravelTime: flow.freeFlowTravelTime ?? null,
       confidence: flow.confidence ?? null,
       roadClosure: Boolean(flow.roadClosure),
+      segments: Array.isArray(flow.segments) ? flow.segments : [],
       updated: flow.updated || ""
     };
   }
@@ -814,6 +815,23 @@
       const travelTimeLabel = hasOfficialTravelTime ? "Kjøretid v/80" : "Segmenttid";
       const delay = getDelaySeconds(trafficFlow);
       const hasFlow = Number.isFinite(speed) || Boolean(displayedTravelTime);
+      const directionalSegments = trafficFlow.segments.slice(0, 2);
+      const tunnelFacts = hasOfficialTravelTime
+        ? `${lengthText} · ca. ${fmtDurationSeconds(tunnel.nominalTravelTime)}`
+        : lengthText;
+      const metricsHtml = directionalSegments.length === 2
+        ? directionalSegments.map(segment => {
+            const segmentSpeed = Number(segment?.currentSpeed);
+            const value = segment?.currentSpeed != null && Number.isFinite(segmentSpeed)
+              ? `${Math.round(segmentSpeed)}<small> km/t</small>`
+              : "–";
+            return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong></div>`;
+          }).join("") +
+          `<div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>`
+        : `
+            <div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>${travelTimeLabel}</span><strong>${displayedTravelTime || "–"}</strong></div>`;
 
       return `
         <article class="tunnelItem ${statusClass}">
@@ -824,13 +842,11 @@
           <div class="tunnelIdentity">
             <div>
               <h3 class="tunnelItemName">${tunnel.name}</h3>
-              <span class="tunnelItemLength">${lengthText}</span>
+              <span class="tunnelItemLength">${tunnelFacts}</span>
             </div>
           </div>
           <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
-            <div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>${travelTimeLabel}</span><strong>${displayedTravelTime || "–"}</strong></div>
+            ${metricsHtml}
           </div>
           <div class="tunnelBottomline">
             <span class="delay ${trafficMeta.className}">${formatDelay(delay)}</span>
