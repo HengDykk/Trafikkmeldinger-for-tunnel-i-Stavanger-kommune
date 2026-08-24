@@ -814,13 +814,25 @@
       const directionalTimes = directionalSegments
         .map(segment => estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed))
         .filter(Number.isFinite);
+      const directionalDelays = directionalSegments
+        .map(segment => {
+          const current = estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed);
+          const freeFlow = estimateTunnelTravelTime(tunnel.length, segment?.freeFlowSpeed);
+          return Number.isFinite(current) && Number.isFinite(freeFlow) ? Math.max(0, current - freeFlow) : null;
+        })
+        .filter(Number.isFinite);
       const estimatedTravelTime = directionalTimes.length
         ? Math.max(...directionalTimes)
         : estimateTunnelTravelTime(tunnel.length, speed);
-      const referenceTravelTime = estimateTunnelTravelTime(tunnel.length, tunnel.speedLimit);
-      const delay = Number.isFinite(estimatedTravelTime) && Number.isFinite(referenceTravelTime)
-        ? Math.max(0, estimatedTravelTime - referenceTravelTime)
-        : null;
+      const freeFlowTravelTime = estimateTunnelTravelTime(
+        tunnel.length,
+        trafficFlow.freeFlowSpeed ?? tunnel.speedLimit
+      );
+      const delay = directionalDelays.length
+        ? Math.max(...directionalDelays)
+        : Number.isFinite(estimatedTravelTime) && Number.isFinite(freeFlowTravelTime)
+          ? Math.max(0, estimatedTravelTime - freeFlowTravelTime)
+          : null;
       const hasFlow = directionalTimes.length > 0 || Number.isFinite(estimatedTravelTime);
       const metricsHtml = directionalSegments.length === 2
         ? directionalSegments.map(segment => {
