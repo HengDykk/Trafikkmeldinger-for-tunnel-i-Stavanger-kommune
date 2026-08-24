@@ -23,18 +23,24 @@ const TUNNEL_REGISTRY = {
 };
 
 const TOMTOM_FLOW_POINTS = {
-  byfjord: { lat: 59.0248, lon: 5.7265 },
-  mastrafjord: { lat: 59.0797, lon: 5.6823 },
+  byfjord: { lat: 59.040508, lon: 5.633805 },
+  mastrafjord: { lat: 59.080372, lon: 5.690412 },
   // Separate E39 tubes north of the interchange, away from the Hundvag and Madlaveien ramps.
   eiganes: [
     { id: "northbound", label: "Mot Bergen", lat: 58.9704066, lon: 5.7126760 },
     { id: "southbound", label: "Mot sentrum", lat: 58.9704205, lon: 5.7117078 },
   ],
-  hundvag: { lat: 58.9869, lon: 5.7488 },
-  ryfast: { lat: 58.9778, lon: 5.7754 },
-  finnoy: { lat: 59.1705, lon: 5.8443 },
-  talgje: { lat: 59.145, lon: 5.84 },
-  storhaug: { lat: 58.9558, lon: 5.7461 },
+  hundvag: [
+    { id: "eastbound", label: "Mot Ryfylke", lat: 58.966268, lon: 5.743592 },
+    { id: "westbound", label: "Mot Stavanger", lat: 58.965804, lon: 5.741294 },
+  ],
+  ryfast: [
+    { id: "westbound", label: "Mot Stavanger", lat: 59.0309111, lon: 5.8005237 },
+    { id: "eastbound", label: "Mot Ryfylke", lat: 59.0306687, lon: 5.8008061 },
+  ],
+  finnoy: { lat: 59.1298373, lon: 5.7939422 },
+  talgje: { lat: 59.1138372, lon: 5.8018914 },
+  storhaug: { lat: 58.961506, lon: 5.752038 },
 };
 
 function normalizeHistorySeed(seed) {

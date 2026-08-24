@@ -20,14 +20,14 @@
   };
 
   const TUNNELS = {
-    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, cameras: [{ id: "byfjord_nord", label: "Mot Byfjordtunnelen" }, { id: "byfjord_sor", label: "Mot Stavanger" }] },
-    mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, cameras: [] },
-    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3700, speedLimit: 80, nominalTravelTime: 165, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
-    hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 2100 },
-    ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, cameras: [] },
-    finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685 },
-    talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", keywords: ["talgjetunnelen"], length: 1467, cameras: [] },
-    storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", keywords: ["storhaugtunnelen"], length: 1100, cameras: [] }
+    byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, speedLimit: 80, cameras: [{ id: "byfjord_nord", label: "Mot Byfjordtunnelen" }, { id: "byfjord_sor", label: "Mot Stavanger" }] },
+    mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, speedLimit: 80, cameras: [] },
+    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3700, speedLimit: 80, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
+    hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 5700, speedLimit: 80 },
+    ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, speedLimit: 80, cameras: [] },
+    finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685, speedLimit: 80 },
+    talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", keywords: ["talgjetunnelen"], length: 1467, speedLimit: 80, cameras: [] },
+    storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", keywords: ["storhaugtunnelen"], length: 1100, speedLimit: 50, cameras: [] }
   };
 
   TUNNELS.hundvag.cameras = [{ id: "hundvag_sandnes", label: "Utløp Hundvåg/Eiganes mot Sandnes" }];
@@ -651,6 +651,13 @@
     return `${mins}:${String(secs).padStart(2, "0")}`;
   }
 
+  function estimateTunnelTravelTime(lengthMeters, speedKmh) {
+    const length = Number(lengthMeters);
+    const speed = Number(speedKmh);
+    if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(speed) || speed <= 0) return null;
+    return Math.round((length / 1000 / speed) * 3600);
+  }
+
   function getRealTrafficFlowDisplayMeta(flow) {
     switch (flow?.level) {
       case "RED":
@@ -802,36 +809,32 @@
         : "Ingen aktive meldinger";
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
-      const speed = Number(trafficFlow.currentSpeed);
-      const normalSpeed = Number(trafficFlow.freeFlowSpeed);
-      const travelTime = fmtDurationSeconds(trafficFlow.currentTravelTime);
-      const hasOfficialSpeedLimit = Number.isFinite(Number(tunnel.speedLimit));
-      const referenceSpeed = hasOfficialSpeedLimit ? Number(tunnel.speedLimit) : normalSpeed;
-      const referenceLabel = hasOfficialSpeedLimit ? "Fartsgrense" : "Fri flyt";
-      const hasOfficialTravelTime = Number.isFinite(Number(tunnel.nominalTravelTime));
-      const displayedTravelTime = hasOfficialTravelTime
-        ? fmtDurationSeconds(tunnel.nominalTravelTime)
-        : travelTime;
-      const travelTimeLabel = hasOfficialTravelTime ? "Kjøretid v/80" : "Segmenttid";
-      const delay = getDelaySeconds(trafficFlow);
-      const hasFlow = Number.isFinite(speed) || Boolean(displayedTravelTime);
+      const speed = trafficFlow.currentSpeed == null ? null : Number(trafficFlow.currentSpeed);
       const directionalSegments = trafficFlow.segments.slice(0, 2);
-      const tunnelFacts = hasOfficialTravelTime
-        ? `${lengthText} · ca. ${fmtDurationSeconds(tunnel.nominalTravelTime)}`
-        : lengthText;
+      const directionalTimes = directionalSegments
+        .map(segment => estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed))
+        .filter(Number.isFinite);
+      const estimatedTravelTime = directionalTimes.length
+        ? Math.max(...directionalTimes)
+        : estimateTunnelTravelTime(tunnel.length, speed);
+      const referenceTravelTime = estimateTunnelTravelTime(tunnel.length, tunnel.speedLimit);
+      const delay = Number.isFinite(estimatedTravelTime) && Number.isFinite(referenceTravelTime)
+        ? Math.max(0, estimatedTravelTime - referenceTravelTime)
+        : null;
+      const hasFlow = directionalTimes.length > 0 || Number.isFinite(estimatedTravelTime);
       const metricsHtml = directionalSegments.length === 2
         ? directionalSegments.map(segment => {
             const segmentSpeed = Number(segment?.currentSpeed);
+            const segmentTime = estimateTunnelTravelTime(tunnel.length, segmentSpeed);
             const value = segment?.currentSpeed != null && Number.isFinite(segmentSpeed)
               ? `${Math.round(segmentSpeed)}<small> km/t</small>`
               : "–";
-            return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong></div>`;
-          }).join("") +
-          `<div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>`
+            const time = Number.isFinite(segmentTime) ? `ca. ${fmtDurationSeconds(segmentTime)}` : "Ingen tidsdata";
+            return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong><em>${time}</em></div>`;
+          }).join("")
         : `
             <div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>${travelTimeLabel}</span><strong>${displayedTravelTime || "–"}</strong></div>`;
+            <div class="tunnelMetric"><span>Estimert kjøretid</span><strong>${Number.isFinite(estimatedTravelTime) ? fmtDurationSeconds(estimatedTravelTime) : "–"}</strong><em>hele tunnelen</em></div>`;
 
       return `
         <article class="tunnelItem ${statusClass}">
@@ -842,7 +845,7 @@
           <div class="tunnelIdentity">
             <div>
               <h3 class="tunnelItemName">${tunnel.name}</h3>
-              <span class="tunnelItemLength">${tunnelFacts}</span>
+              <span class="tunnelItemLength">${lengthText}</span>
             </div>
           </div>
           <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
