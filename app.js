@@ -22,7 +22,7 @@
   const TUNNELS = {
     byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, cameras: [{ id: "byfjord_nord", label: "Mot Byfjordtunnelen" }, { id: "byfjord_sor", label: "Mot Stavanger" }] },
     mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, cameras: [] },
-    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3174, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Eiganestunnelen" }] },
+    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3174, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
     hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 2100 },
     ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, cameras: [] },
     finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685 },
@@ -69,8 +69,7 @@
     summaryFlow: el("summaryFlow"),
     summaryFlowDetail: el("summaryFlowDetail"),
     summaryEvents: el("summaryEvents"),
-    summaryEventDetail: el("summaryEventDetail"),
-    summaryCoverage: el("summaryCoverage")
+    summaryEventDetail: el("summaryEventDetail")
   };
 
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
@@ -492,10 +491,7 @@
       <figure class="staticCamFigure">
         <img class="staticCamImage" src="${esc(cam.src)}" alt="${esc(cam.label)}"
           referrerpolicy="no-referrer" data-cam-id="${esc(cam.id)}">
-        <figcaption class="staticCamCaption">
-          <span>${esc(cam.tunnelName)}</span>
-          <small>${esc(cam.label)}</small>
-        </figcaption>
+        <figcaption class="staticCamCaption">${esc(cam.tunnelName)} - ${esc(cam.label)}</figcaption>
         ${index === 0 ? `<span class="cameraLiveBadge"><i></i>Live</span>` : ""}
       </figure>`).join("");
 
@@ -754,7 +750,6 @@
     dom.summaryFlowDetail.textContent = redCount || yellowCount ? `${redCount + yellowCount} målinger med forsinkelse` : "Flyt nær normalnivå";
     dom.summaryEvents.textContent = String(activeEvents);
     dom.summaryEventDetail.textContent = activeEvents === 1 ? "relevant hendelse" : "relevante hendelser";
-    dom.summaryCoverage.textContent = `${measured.length}/${statuses.length}`;
   }
 
   function updateTunnelClosureHistory(defaultTimeIso) {
