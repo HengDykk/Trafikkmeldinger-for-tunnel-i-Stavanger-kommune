@@ -22,7 +22,7 @@
   const TUNNELS = {
     byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, cameras: [{ id: "byfjord_nord", label: "Mot Byfjordtunnelen" }, { id: "byfjord_sor", label: "Mot Stavanger" }] },
     mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, cameras: [] },
-    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3174, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
+    eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3700, speedLimit: 80, nominalTravelTime: 165, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
     hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 2100 },
     ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, cameras: [] },
     finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685 },
@@ -804,8 +804,16 @@
       const speed = Number(trafficFlow.currentSpeed);
       const normalSpeed = Number(trafficFlow.freeFlowSpeed);
       const travelTime = fmtDurationSeconds(trafficFlow.currentTravelTime);
+      const hasOfficialSpeedLimit = Number.isFinite(Number(tunnel.speedLimit));
+      const referenceSpeed = hasOfficialSpeedLimit ? Number(tunnel.speedLimit) : normalSpeed;
+      const referenceLabel = hasOfficialSpeedLimit ? "Fartsgrense" : "Fri flyt";
+      const hasOfficialTravelTime = Number.isFinite(Number(tunnel.nominalTravelTime));
+      const displayedTravelTime = hasOfficialTravelTime
+        ? fmtDurationSeconds(tunnel.nominalTravelTime)
+        : travelTime;
+      const travelTimeLabel = hasOfficialTravelTime ? "Kjøretid v/80" : "Segmenttid";
       const delay = getDelaySeconds(trafficFlow);
-      const hasFlow = Number.isFinite(speed) || Boolean(travelTime);
+      const hasFlow = Number.isFinite(speed) || Boolean(displayedTravelTime);
 
       return `
         <article class="tunnelItem ${statusClass}">
@@ -820,9 +828,9 @@
             </div>
           </div>
           <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
-            <div class="tunnelMetric"><span>Fart nå</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>Normal fart</span><strong>${Number.isFinite(normalSpeed) ? `${Math.round(normalSpeed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>Reisetid</span><strong>${travelTime || "–"}</strong></div>
+            <div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>${referenceLabel}</span><strong>${Number.isFinite(referenceSpeed) ? `${Math.round(referenceSpeed)}<small> km/t</small>` : "–"}</strong></div>
+            <div class="tunnelMetric"><span>${travelTimeLabel}</span><strong>${displayedTravelTime || "–"}</strong></div>
           </div>
           <div class="tunnelBottomline">
             <span class="delay ${trafficMeta.className}">${formatDelay(delay)}</span>
