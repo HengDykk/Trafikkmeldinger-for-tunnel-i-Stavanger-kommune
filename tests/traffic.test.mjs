@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import vm from "node:vm";
 import { isClosureMessage, isPartialClosure, measurementAge } from "../traffic-rules.js";
-import { TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, aggregateTomTomFlows, buildUnknownTomTomFlow } from "../functions/api/combined.js";
+import { TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, aggregateTomTomFlows, buildUnknownTomTomFlow, extractMessagesFromDatex } from "../functions/api/combined.js";
 
 test("partial and negated closures do not close the entire tunnel", () => {
   assert.equal(isClosureMessage({ roadManagementType: "laneBlocked" }), false);
@@ -32,8 +32,8 @@ function coordinator(initial, fetcher) {
   const values = new Map(initial ? [["state", initial]] : []);
   const context = {
     DurableObject: class { constructor(ctx) { this.ctx = ctx; } },
-    TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, aggregateTomTomFlows, buildUnknownTomTomFlow,
-    Date, Promise, URL, AbortSignal, fetch: fetcher,
+    TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, aggregateTomTomFlows, buildUnknownTomTomFlow, extractMessagesFromDatex,
+    Date, Promise, URL, AbortSignal, btoa, fetch: fetcher,
   };
   let source = fs.readFileSync(new URL("../workers/traffic-coordinator.js", import.meta.url), "utf8");
   source = source.replace(/^import .*;\r?\n/gm, "").replace("export class", "class");
@@ -70,4 +70,17 @@ test("rolling budget is enforced across UTC midnight", async () => {
   const {instance} = coordinator({attempts:Array(2000).fill(Date.now()-60000),nextAttempt:0,flows:{}}, async()=>{calls++;});
   await instance.getTraffic("test-key");
   assert.equal(calls, 0);
+});
+
+test("simultaneous visitors share one parsed Vegvesen snapshot", async () => {
+  let calls = 0;
+  const {instance} = coordinator(null, async () => {
+    calls++;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    return {ok:true,status:200,text:async()=>'<situationRecord><comment>Byfjordtunnelen stengt</comment></situationRecord>'};
+  });
+  const results = await Promise.all(Array.from({length:20}, () => instance.getSituation("user", "password")));
+  await instance.getSituation("user", "password");
+  assert.equal(calls, 1);
+  assert.equal(results[0].messages[0].text, "Byfjordtunnelen stengt");
 });

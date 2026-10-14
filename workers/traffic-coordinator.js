@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, buildUnknownTomTomFlow, aggregateTomTomFlows } from "../functions/api/combined.js";
+import { TOMTOM_FLOW_POINTS, TUNNEL_REGISTRY, classifyTomTomFlow, buildUnknownTomTomFlow, aggregateTomTomFlows, extractMessagesFromDatex } from "../functions/api/combined.js";
 
 const INTERVAL = 15 * 60 * 1000;
 const WINDOW = 24 * 60 * 60 * 1000;
@@ -10,6 +10,33 @@ export class TrafficCoordinator extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.pending = null;
+    this.pendingSituation = null;
+  }
+
+  async getSituation(user, password) {
+    if (!this.pendingSituation) {
+      this.pendingSituation = this.refreshSituation(user, password).finally(() => { this.pendingSituation = null; });
+    }
+    return this.pendingSituation;
+  }
+
+  async refreshSituation(user, password) {
+    const saved = await this.ctx.storage.get("situation");
+    if (saved && Date.now() - saved.fetchedAt < 45000) return saved.result;
+    let result;
+    try {
+      const headers = { Accept: "application/xml", "User-Agent": "Tunneltrafikk Stavanger" };
+      if (user && password) headers.Authorization = "Basic " + btoa(`${user}:${password}`);
+      const response = await fetch("https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata", {
+        headers, signal: AbortSignal.timeout(8000),
+      });
+      const messages = response.ok ? extractMessagesFromDatex(await response.text()) : [];
+      result = { ok: response.ok, status: response.status, messages, updated: new Date().toISOString() };
+    } catch {
+      result = { ok: false, status: 503, messages: [], updated: "" };
+    }
+    await this.ctx.storage.put("situation", { fetchedAt: Date.now(), result });
+    return result;
   }
 
   async getTraffic(apiKey) {

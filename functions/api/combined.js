@@ -290,25 +290,15 @@ export async function onRequest(context) {
   const user = env.DATEX_USER;
   const pass = env.DATEX_PASS;
 
-  const upstream =
-    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
   const timeoutMs = 10000;
 
   const cache = caches.default;
-  const cacheKey = new Request(new URL(context.request.url).toString(), {
+  const cacheKey = new Request(new URL("/api/combined?region=stavanger", context.request.url).toString(), {
     method: "GET",
   });
   const historyCacheKey = new Request("https://trafikkmeldinger.internal/tunnel-history.json", {
     method: "GET",
   });
-
-  const headers = {
-    "User-Agent": "Byfjordtunnelen/1.0 (Cloudflare Pages)",
-  };
-
-  if (user && pass) {
-    headers.Authorization = "Basic " + btoa(`${user}:${pass}`);
-  }
 
   const buildPayload = (messagesClean, travelFlowByTunnel = {}, previousHistory = {}, seedHistory = {}) => {
     const stavangerMustHave = [
@@ -463,27 +453,21 @@ export async function onRequest(context) {
   const historyCached = await cache.match(historyCacheKey);
   const previousHistory = historyCached ? await historyCached.clone().json().catch(() => ({})) : {};
   const seedHistory = normalizeHistorySeed(MANUAL_TUNNEL_HISTORY_SEED);
+  if (cached) {
+    const recent = await cached.clone().json().catch(() => null);
+    if (recent && !recent.stale && Date.now() - Date.parse(recent.updated || "") < 30000) {
+      return json(recent, 200, "public, max-age=15, s-maxage=30");
+    }
+  }
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
     const [res, travelFlowByTunnel, policeMessages] = await Promise.all([
-      fetch(upstream, {
-        method: "GET",
-        headers,
-        signal: controller.signal,
-        cf: {
-          cacheTtl: 30,
-          cacheEverything: true,
-        },
-      }),
+      env.TOMTOM_COORDINATOR
+        ? env.TOMTOM_COORDINATOR.getByName("traffic-api-key-quota").getSituation(user, pass)
+        : Promise.resolve({ ok: false, status: 503, messages: [] }),
       fetchTomTomTrafficData(env),
       fetchPolitiloggenTrafficMessages(timeoutMs),
     ]);
-
-    clearTimeout(timeoutId);
-    const xml = await res.text();
 
     if (!res.ok) {
       if (cached) {
@@ -514,13 +498,12 @@ export async function onRequest(context) {
         {
           updated: new Date().toISOString(),
           error: `Upstream ${res.status}`,
-          raw: xml.slice(0, 2000),
         },
         502
       );
     }
 
-    const rawMessages = extractMessagesFromDatex(xml);
+    const rawMessages = res.messages || [];
     const seen = new Set();
     const messagesClean = [];
     for (const m of rawMessages) {
@@ -538,7 +521,7 @@ export async function onRequest(context) {
           state: "ok",
           label: "OK",
           detail: "DATEX-data mottatt fra Statens vegvesen",
-          updated: new Date().toISOString(),
+          updated: res.updated || new Date().toISOString(),
         },
         tomtom: {
           ...getTomTomSourceStatus(travelFlowByTunnel),
@@ -627,7 +610,7 @@ function json(obj, status, cacheControl = "no-store") {
   });
 }
 
-function extractMessagesFromDatex(xml) {
+export function extractMessagesFromDatex(xml) {
   const records =
     xml.match(/<(?:[\w.-]+:)?situationRecord\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?situationRecord>/g) || [];
 
