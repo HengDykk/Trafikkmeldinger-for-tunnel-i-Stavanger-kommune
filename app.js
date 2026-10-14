@@ -189,16 +189,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     Object.values(STATE.messagesByTunnel).forEach(msgs =>
       msgs.filter(isMessageActiveNow).forEach(message => relevant.add(msgKey(message)))
     );
-    const tunnelMsgKeys = new Set();
-    Object.values(STATE.messagesByTunnel).forEach(msgs =>
-      msgs.filter(m => isMessageActiveNow(m)).forEach(m => tunnelMsgKeys.add(msgKey(m)))
-    );
-    STATE.allMessages.forEach(message => {
-      if (!isMessageActiveNow(message)) return;
-      if (tunnelMsgKeys.has(msgKey(message))) return;
-      const sev = String(message.severity || "").toUpperCase();
-      if (sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM") relevant.add(msgKey(message));
-    });
     return relevant.size;
   }
 
@@ -289,23 +279,13 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     stopAutoScroll();
 
     // Build tunnel groups — messages that match a specific tunnel
-    const tunnelMsgKeys = new Set();
     const groups = [];
     for (const [key, tunnel] of Object.entries(TUNNELS)) {
       const msgs = (STATE.messagesByTunnel[key] || []).filter(m => isMessageActiveNow(m));
       if (msgs.length > 0) {
         groups.push({ key, tunnel, msgs });
-        msgs.forEach(m => tunnelMsgKeys.add(msgKey(m)));
       }
     }
-
-    // General high-priority messages not matched to any tunnel
-    const generalMsgs = STATE.allMessages.filter(m => {
-      if (!isMessageActiveNow(m)) return false;
-      if (tunnelMsgKeys.has(msgKey(m))) return false;
-      const sev = String(m.severity || "").toUpperCase();
-      return sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM";
-    }).slice(0, 5);
 
     // Update event count
     if (dom.eventCount) {
@@ -327,16 +307,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
           </div>
           <div class="tunnelGroupItems">
             ${msgs.map(m => messageItemHtml(m)).join("")}
-          </div>
-        </div>`;
-    }
-
-    if (generalMsgs.length > 0) {
-      html += `
-        <div class="tunnelGroup">
-          <div class="tunnelGroupHeader generalGroupHeader">Annet i Stavanger</div>
-          <div class="tunnelGroupItems">
-            ${generalMsgs.map(m => messageItemHtml(m)).join("")}
           </div>
         </div>`;
     }
