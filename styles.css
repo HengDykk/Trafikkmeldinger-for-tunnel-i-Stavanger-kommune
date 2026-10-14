@@ -58,7 +58,7 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 .foot,.footLeft{flex-wrap:wrap}.healthDot{flex-shrink:0;width:8px;height:8px}
 .staticCamCaption{font-size:13px;line-height:1.3}.overviewTitle{font-size:25px}
 .tunnelMetric em{white-space:normal;overflow-wrap:anywhere}
-.activeMessages{flex:0 0 auto;margin-bottom:12px}.activeMessages+.staticCameraPanel{flex:0 0 auto;min-height:600px}
+.activeMessages{flex:0 0 auto;margin-bottom:12px}.activeMessages+.staticCameraPanel{flex:1 0 400px;min-height:400px;height:400px}
 .cameraExpand{position:absolute;top:8px;right:8px;padding:5px 9px;border:1px solid #5b6674;border-radius:4px;background:#0d1218e8;color:white;font:600 12px inherit;cursor:pointer}
 .cameraExpand:focus-visible{outline:2px solid white;outline-offset:2px}
 .cameraError{display:none;position:absolute;inset:35% 10px auto;text-align:center;color:var(--muted);font-size:14px}
@@ -94,4 +94,5 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
   .tunnelItem{gap:6px;min-height:220px}.tunnelBottomline{align-items:flex-start}
   .measurementAge{margin-top:0}.foot{font-size:13px}.rushHourBanner{gap:10px;flex-wrap:wrap}
   .overviewTitle{font-size:21px}.messagesCard{min-height:0}
+  .activeMessages+.staticCameraPanel{height:auto;min-height:1100px;flex:0 0 auto}
 }
