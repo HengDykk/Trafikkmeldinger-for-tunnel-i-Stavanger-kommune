@@ -21,7 +21,7 @@ export class TrafficCoordinator extends DurableObject {
   }
 
   async refreshSituation(user, password) {
-    const saved = await this.ctx.storage.get("situation-v2");
+    const saved = await this.ctx.storage.get("situation-v3");
     if (saved && Date.now() - saved.fetchedAt < 45000) return saved.result;
     let result;
     try {
@@ -30,12 +30,13 @@ export class TrafficCoordinator extends DurableObject {
       const response = await fetch("https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata", {
         headers, signal: AbortSignal.timeout(8000),
       });
-      const messages = response.ok ? extractMessagesFromDatex(await response.text()) : [];
+      const xml = response.ok ? await response.text() : "";
+      const messages = response.ok ? extractMessagesFromDatex(xml) : [];
       result = { ok: response.ok, status: response.status, messages, updated: new Date().toISOString() };
     } catch {
       result = { ok: false, status: 503, messages: [], updated: "" };
     }
-    await this.ctx.storage.put("situation-v2", { fetchedAt: Date.now(), result });
+    await this.ctx.storage.put("situation-v3", { fetchedAt: Date.now(), result });
     return result;
   }
 

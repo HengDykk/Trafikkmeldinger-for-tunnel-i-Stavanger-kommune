@@ -11,7 +11,7 @@ export function isClosureMessage(message) {
 export function isPartialClosure(message) {
   const type = `${message?.roadManagementType || ""} ${message?.trafficConstrictionType || ""}`.toLowerCase();
   const text = `${message?.title || ""} ${message?.text || ""}`.toLowerCase();
-  return /lane.*(?:blocked|closed)|partial|constrict|narrowing/.test(type) ||
+  return /lane.*(?:blocked|closed|closures)|partial|constrict|narrowing/.test(type) ||
     (/\b(?:felt|lane|rampe|ett løp|én retning|en retning)\b/.test(text) && /stengt|sperret|closed|blocked/.test(text));
 }
 

@@ -430,7 +430,7 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
   function fmtTime(iso) {
     try {
       if (!iso) return "--:--";
-      return new Date(iso).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+      return new Date(iso).toLocaleTimeString("no-NO", { timeZone: "Europe/Oslo", hour: "2-digit", minute: "2-digit" });
     } catch { return "--:--"; }
   }
 
@@ -806,7 +806,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     const warningCount = statuses.filter(status => status === "AVVIK").length;
     const flows = Object.values(STATE.tunnelTrafficFlow).map(normalizeTrafficFlow);
     const measured = flows.filter(flow => flow.level !== "UNKNOWN");
-    const closureCount = flows.filter(flow => flow.roadClosure).length;
+    const closureCount = Object.entries(STATE.tunnelTrafficFlow).filter(([key, flow]) =>
+      normalizeTrafficFlow(flow).roadClosure && STATE.tunnelStatuses[key] !== "STENGT"
+    ).length;
     const redCount = flows.filter(flow => flow.level === "RED" && !flow.roadClosure).length;
     const yellowCount = flows.filter(flow => flow.level === "YELLOW").length;
     const activeEvents = getRelevantEventCount();
@@ -820,13 +822,13 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
       : warningCount > 0
         ? `${warningCount} ${warningCount === 1 ? "tunnel har" : "tunneler har"} avvik`
         : closureCount ? "Mulig stengning meldt av TomTom" : `Ingen stengninger registrert i ${statuses.length} tunneler`;
-    dom.overviewSub.textContent = !STATE.statusFresh ? "Viser sist kjente informasjon. Kontroller Vegvesen før avreise." : closureCount ? "Stengningsvarsel fra TomTom er ikke bekreftet av Vegvesen" : closedCount || warningCount
+    dom.overviewSub.textContent = !STATE.statusFresh ? "Viser sist kjente informasjon. Kontroller Vegvesen før avreise." : closedCount ? "Bekreftet av Vegvesen. Se årsak og forventet åpning nedenfor." : closureCount ? "Stengningsvarsel fra TomTom er ikke bekreftet av Vegvesen" : warningCount
       ? "Se berørte tunneler og aktive meldinger nedenfor"
       : "Ingen registrerte stengninger eller tunnelavvik";
 
-    dom.summaryFlow.textContent = closureCount ? "Stengningsvarsel" : redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
-    dom.summaryFlow.className = closureCount ? "metricWarn" : redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
-    dom.summaryFlowDetail.textContent = closureCount ? "Meldt av TomTom" : redCount || yellowCount ? `${redCount + yellowCount} ${redCount + yellowCount === 1 ? "tunnel" : "tunneler"} med redusert flyt` : measured.length ? "Ingen målt forsinkelse" : "Ingen ferske trafikkmålinger";
+    dom.summaryFlow.textContent = closedCount ? "Stengt" : closureCount ? "Stengningsvarsel" : redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
+    dom.summaryFlow.className = closedCount ? "metricBad" : closureCount ? "metricWarn" : redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
+    dom.summaryFlowDetail.textContent = closedCount ? "Bekreftet av Vegvesen" : closureCount ? "Meldt av TomTom" : redCount || yellowCount ? `${redCount + yellowCount} ${redCount + yellowCount === 1 ? "tunnel" : "tunneler"} med redusert flyt` : measured.length ? "Ingen målt forsinkelse" : "Ingen ferske trafikkmålinger";
     dom.summaryEvents.textContent = String(activeEvents);
     dom.summaryEventDetail.textContent = activeEvents === 1 ? "relevant hendelse" : "relevante hendelser";
   }
@@ -876,8 +878,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
         status === "STENGT" ? "Stengt" : "Avvik";
       
       const tunnelMessages = (STATE.messagesByTunnel[key] || []).filter(isMessageActiveNow);
-      const reason = closureConflict ? "TomTom melder stengning. Ikke bekreftet av Vegvesen." : tunnelMessages.length > 0
-        ? (tunnelMessages[0].text || tunnelMessages[0].title)
+      const closureMessage = tunnelMessages.find(isClosureMessage);
+      const reason = closureMessage ? closureMessage.versionTime ? `Endret ${fmtClosedTime(closureMessage.versionTime)}` : closureMessage.eventDescription || closureMessage.title : closureConflict ? "TomTom melder stengning. Ikke bekreftet av Vegvesen." : tunnelMessages.length > 0
+        ? ((closureMessage || tunnelMessages[0]).text || (closureMessage || tunnelMessages[0]).title)
         : "Ingen aktive meldinger";
       
       const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
@@ -906,7 +909,13 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
           ? Math.max(0, estimatedTravelTime - freeFlowTravelTime)
           : null;
       const hasFlow = directionalTimes.length > 0 || Number.isFinite(estimatedTravelTime);
-      const metricsHtml = directionalSegments.length === 2
+      const endTime = closureMessage?.overallEndTime ? new Date(closureMessage.overallEndTime) : null;
+      const hasEndTime = endTime && Number.isFinite(endTime.getTime());
+      const sourceLink = closureMessage?.situationId
+        ? `<a class="closureSource" href="https://www.vegvesen.no/trafikk/trafikkmeldinger/${encodeURIComponent(closureMessage.situationId)}" target="_blank" rel="noopener noreferrer">Melding hos Vegvesen</a>` : "";
+      const metricsHtml = status === "STENGT"
+        ? `<div class="tunnelMetric"><span>Forventet åpning</span><strong>${hasEndTime ? esc(fmtTime(endTime.toISOString())) : "Ukjent"}</strong><em>${hasEndTime ? esc(endTime.toLocaleDateString("nb-NO", { timeZone: "Europe/Oslo" })) : "Ikke oppgitt"}</em></div><div class="tunnelMetric closureCause"><span>Årsak</span><strong>${esc(closureMessage?.eventDescription || "Stengt vei")}</strong><em>Vegvesen</em></div>`
+        : directionalSegments.length === 2
         ? directionalSegments.map(segment => {
             const segmentSpeed = Number(segment?.currentSpeed);
             const segmentTime = estimateTunnelTravelTime(tunnel.length, segmentSpeed);
@@ -924,7 +933,7 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
         <article class="tunnelItem ${statusClass}">
           <div class="tunnelTopline">
             <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
-            <span class="flowState ${trafficMeta.className}"><i></i>${trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
+            <span class="flowState ${trafficMeta.className}"><i></i>${status === "STENGT" ? "Vegvesen" : trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
           </div>
           <div class="tunnelIdentity">
             <div>
@@ -936,10 +945,10 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
             ${metricsHtml}
           </div>
           <div class="tunnelBottomline">
-            <span class="delay ${trafficMeta.className}">${trafficFlow.roadClosure ? "Kontroller stengningsvarsel" : formatDelay(delay)}</span>
+            <span class="delay ${trafficMeta.className}">${status === "STENGT" ? STATE.statusFresh ? "Bekreftet stengt" : "Sist meldt stengt" : trafficFlow.roadClosure ? "Kontroller stengningsvarsel" : formatDelay(delay)}</span>
             <span class="tunnelReason">${esc(reason)}</span>
           </div>
-          <div class="measurementAge">${esc(formatMeasurementAge(trafficFlow))}</div>
+          <div class="measurementAge">${status === "STENGT" ? sourceLink : esc(formatMeasurementAge(trafficFlow))}</div>
         </article>
       `;
     }).join("");

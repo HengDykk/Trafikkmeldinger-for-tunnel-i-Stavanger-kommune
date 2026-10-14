@@ -58,6 +58,9 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 .foot,.footLeft{flex-wrap:wrap}.healthDot{flex-shrink:0;width:8px;height:8px}
 .staticCamCaption{font-size:13px;line-height:1.3}.overviewTitle{font-size:25px}
 .tunnelMetric em{white-space:normal;overflow-wrap:anywhere}
+.closureCause strong{font:700 16px 'DM Sans',sans-serif;white-space:normal;overflow-wrap:anywhere}
+.closureSource{color:#9cceff;text-decoration:underline;text-underline-offset:3px;font-size:13px}
+.tunnelItem.status-closed .flowState,.tunnelItem.status-closed .delay{color:var(--bad)}
 .activeMessages{flex:0 0 auto;margin-bottom:12px}.activeMessages+.staticCameraPanel{flex:1 0 400px;min-height:400px;height:400px}
 .cameraExpand{position:absolute;top:8px;right:8px;padding:5px 9px;border:1px solid #5b6674;border-radius:4px;background:#0d1218e8;color:white;font:600 12px inherit;cursor:pointer}
 .cameraExpand:focus-visible{outline:2px solid white;outline-offset:2px}

@@ -504,15 +504,7 @@ export async function onRequest(context) {
     }
 
     const rawMessages = res.messages || [];
-    const seen = new Set();
-    const messagesClean = [];
-    for (const m of rawMessages) {
-      const key = `${(m.text || m.title || "").trim().toLowerCase()}|${(m.where || "").trim().toLowerCase()}`;
-      if (!key.trim()) continue;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      messagesClean.push(m);
-    }
+    const messagesClean = coalesceDatexMessages(rawMessages);
 
     const payload = {
       ...buildPayload([...messagesClean, ...policeMessages], travelFlowByTunnel, previousHistory || {}, seedHistory),
@@ -610,9 +602,41 @@ function json(obj, status, cacheControl = "no-store") {
   });
 }
 
+export function coalesceDatexMessages(messages) {
+  const groups = new Map();
+  for (const message of messages) {
+    const identity = message.situationId || `${message.recordId || ""}|${message.roadManagementType || ""}|${message.text}|${message.where}`;
+    const key = `${identity}|${message.where}|${message.validityStatus}|${message.overallStartTime}|${message.overallEndTime}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(message);
+  }
+  return [...groups.values()].map(records => {
+    const closure = records.find(isClosureMessage);
+    const representative = closure || records.find(record => record.roadManagementType) || records[0];
+    const works = records.some(record => /Works$/.test(record.recordType || ""));
+    const eventDescription = works ? "Veiarbeid" : "";
+    const comments = [...new Set(records.map(record => record.text).filter(Boolean))];
+    const title = closure ? "Stengt vei" : representative.title;
+    return {
+      ...representative,
+      title,
+      severity: closure ? "HIGH" : representative.severity,
+      sourceType: "datex",
+      sourceLabel: "Vegvesen",
+      text: [...new Set([closure ? "Stengt vei" : "", eventDescription, ...comments].filter(Boolean))].join(". "),
+      eventDescription,
+      regulations: [...new Set(records.map(record => record.roadManagementType).filter(Boolean))],
+    };
+  });
+}
+
 export function extractMessagesFromDatex(xml) {
-  const records =
-    xml.match(/<(?:[\w.-]+:)?situationRecord\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?situationRecord>/g) || [];
+  const situations = xml.match(/<(?:[\w.-]+:)?situation\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?situation>/g) || [xml];
+  const records = situations.flatMap(situation => {
+    const situationId = situation.match(/^<(?:[\w.-]+:)?situation\b[^>]*\bid="([^"]+)"/)?.[1] || "";
+    return (situation.match(/<(?:[\w.-]+:)?situationRecord\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?situationRecord>/g) || [])
+      .map(record => ({ record, situationId }));
+  });
 
   const decodeXml = (s) =>
     (s || "")
@@ -690,7 +714,7 @@ export function extractMessagesFromDatex(xml) {
   const messages = [];
   const localTerms = ["stavanger", ...Object.values(TUNNEL_REGISTRY).flatMap(tunnel => tunnel.matchTerms)];
 
-  for (const r of records) {
+  for (const { record: r, situationId } of records) {
     // Skip unrelated national records before interpreting every XML field.
     const candidate = r.toLowerCase();
     if (!localTerms.some(term => candidate.includes(term))) continue;
@@ -721,6 +745,9 @@ export function extractMessagesFromDatex(xml) {
     if (!title && !text) continue;
 
     messages.push({
+      situationId,
+      recordId: r.match(/^<[^>]+\bid="([^"]+)"/)?.[1] || "",
+      sourceUrl: situationId ? `https://www.vegvesen.no/trafikk/trafikkmeldinger/${encodeURIComponent(situationId)}` : "",
       title,
       text,
       where,
