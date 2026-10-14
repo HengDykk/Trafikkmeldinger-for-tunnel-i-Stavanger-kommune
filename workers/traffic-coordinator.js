@@ -21,11 +21,11 @@ export class TrafficCoordinator extends DurableObject {
   }
 
   async refreshSituation(user, password) {
-    const saved = await this.ctx.storage.get("situation");
+    const saved = await this.ctx.storage.get("situation-v2");
     if (saved && Date.now() - saved.fetchedAt < 45000) return saved.result;
     let result;
     try {
-      const headers = { Accept: "application/xml", "User-Agent": "Tunneltrafikk Stavanger" };
+      const headers = { "User-Agent": "Byfjordtunnelen/1.0 (Cloudflare Pages)" };
       if (user && password) headers.Authorization = "Basic " + btoa(`${user}:${password}`);
       const response = await fetch("https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata", {
         headers, signal: AbortSignal.timeout(8000),
@@ -35,7 +35,7 @@ export class TrafficCoordinator extends DurableObject {
     } catch {
       result = { ok: false, status: 503, messages: [], updated: "" };
     }
-    await this.ctx.storage.put("situation", { fetchedAt: Date.now(), result });
+    await this.ctx.storage.put("situation-v2", { fetchedAt: Date.now(), result });
     return result;
   }
 
