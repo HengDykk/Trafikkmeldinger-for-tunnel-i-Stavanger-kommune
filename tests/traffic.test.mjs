@@ -16,9 +16,9 @@ test("partial and negated closures do not close the entire tunnel", () => {
 
 test("Vegvesen records after the first 80 remain available", () => {
   const source = fs.readFileSync(new URL("../functions/api/combined.js", import.meta.url), "utf8");
-  const extract = vm.runInNewContext(source.slice(source.indexOf("function extractMessagesFromDatex(")) + ";extractMessagesFromDatex");
+  const extract = vm.runInNewContext(source.slice(source.indexOf("function extractMessagesFromDatex(")) + ";extractMessagesFromDatex", { TUNNEL_REGISTRY });
   const record = text => `<situationRecord><comment>${text}</comment></situationRecord>`;
-  const xml = Array.from({length:80}, () => record("Oslo vegarbeid")).join("") + record("Byfjordtunnelen stengt");
+  const xml = Array.from({length:80}, () => record("Stavanger vegarbeid")).join("") + record("Byfjordtunnelen stengt");
   assert.equal(extract(xml).length, 81);
   assert.equal(extract(xml)[80].text, "Byfjordtunnelen stengt");
 });

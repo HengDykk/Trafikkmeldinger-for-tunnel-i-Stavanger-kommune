@@ -629,7 +629,7 @@ function json(obj, status, cacheControl = "no-store") {
 
 function extractMessagesFromDatex(xml) {
   const records =
-    xml.match(/<[^:>]*:?situationRecord\b[\s\S]*?<\/[^:>]*:?situationRecord>/g) || [];
+    xml.match(/<(?:[\w.-]+:)?situationRecord\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?situationRecord>/g) || [];
 
   const decodeXml = (s) =>
     (s || "")
@@ -648,13 +648,13 @@ function extractMessagesFromDatex(xml) {
       .trim();
 
   const pick = (block, tag) => {
-    const re = new RegExp(`<[^:>]*:?${tag}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tag}>`, "i");
+    const re = new RegExp(`<(?:[\\w.-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${tag}>`, "i");
     const m = block.match(re);
     return m ? normalize(m[1]) : "";
   };
 
   const pickAll = (block, tag) => {
-    const re = new RegExp(`<[^:>]*:?${tag}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tag}>`, "gi");
+    const re = new RegExp(`<(?:[\\w.-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${tag}>`, "gi");
     const out = [];
     let m;
     while ((m = re.exec(block)) !== null) {
@@ -705,8 +705,12 @@ function extractMessagesFromDatex(xml) {
   };
 
   const messages = [];
+  const localTerms = ["stavanger", ...Object.values(TUNNEL_REGISTRY).flatMap(tunnel => tunnel.matchTerms)];
 
   for (const r of records) {
+    // Skip unrelated national records before interpreting every XML field.
+    const candidate = r.toLowerCase();
+    if (!localTerms.some(term => candidate.includes(term))) continue;
     const commentRaw = pick(r, "comment");
     const text = (commentRaw || "").trim();
     const municipality =
@@ -727,7 +731,7 @@ function extractMessagesFromDatex(xml) {
     const roadManagementType = pick(r, "roadOrCarriagewayOrLaneManagementType") || "";
 
     const where = buildWhere(r);
-    const typeMatch = r.match(/<[^:>]*:?situationRecord\b[^>]*\bxsi:type="[^:"]*:([^"]+)"/i);
+    const typeMatch = r.match(/<(?:[\w.-]+:)?situationRecord\b[^>]*\bxsi:type="[^:"]*:([^"]+)"/i);
     const recordType = typeMatch ? typeMatch[1] : "";
     const title = text ? text.split(".")[0].slice(0, 90) : "Trafikkmelding";
 
