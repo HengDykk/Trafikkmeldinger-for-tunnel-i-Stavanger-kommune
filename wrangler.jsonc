@@ -1,5 +1,12 @@
 {
   "name": "trafikkmeldinger",
   "compatibility_date": "2025-12-01",
-  "pages_build_output_dir": "./"
+  "pages_build_output_dir": "./",
+  "durable_objects": {
+    "bindings": [{
+      "name": "TOMTOM_COORDINATOR",
+      "class_name": "TrafficCoordinator",
+      "script_name": "trafikkmeldinger-flow"
+    }]
+  }
 }

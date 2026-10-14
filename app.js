@@ -1,3 +1,5 @@
+import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-rules.js";
+
 (() => {
   const el = (id) => document.getElementById(id);
   const previewApiOrigin = location.hostname.endsWith(".trafikkmeldinger.pages.dev")
@@ -46,7 +48,8 @@
     progressAnimId: null,
     scrollAnimId: null,
     scrollPauseId: null,
-    cameraRefreshId: null
+    cameraRefreshId: null,
+    statusFresh: false
   };
 
   const dom = {
@@ -298,6 +301,7 @@
 
     // General high-priority messages not matched to any tunnel
     const generalMsgs = STATE.allMessages.filter(m => {
+      if (!isMessageActiveNow(m)) return false;
       if (tunnelMsgKeys.has(msgKey(m))) return false;
       const sev = String(m.severity || "").toUpperCase();
       return sev === "HIGH" || sev === "HIGHEST" || sev === "MEDIUM";
@@ -337,8 +341,9 @@
         </div>`;
     }
 
-    dom.items.innerHTML = html;
-    startAutoScroll();
+    dom.items.innerHTML = `<div class="activeMessages">${html}</div>${cameraPanelHtml()}`;
+    bindCameraImages();
+    startCameraRefresh();
   }
 
   function startProgressCountdown() {
@@ -413,7 +418,8 @@
   function updateGlobalTheme() {
     if (!dom.app) return;
     const hasClosed = Object.values(STATE.tunnelStatuses).some(s => s === "STENGT");
-    const hasWarning = Object.values(STATE.tunnelStatuses).some(s => s === "AVVIK");
+    const hasWarning = !STATE.statusFresh || Object.values(STATE.tunnelStatuses).some(s => s === "AVVIK") ||
+      Object.values(STATE.tunnelTrafficFlow).some(flow => normalizeTrafficFlow(flow).roadClosure);
     
     dom.app.classList.remove("good", "bad", "warn");
     if (hasClosed) dom.app.classList.add("bad");
@@ -490,23 +496,45 @@
       return;
     }
 
-    const figures = cameras.map((cam, index) => `
+    dom.items.innerHTML = cameraPanelHtml();
+    bindCameraImages();
+    startCameraRefresh();
+  }
+
+  function cameraPanelHtml() {
+    const figures = getAllCameraSources().map(cam => `
       <figure class="staticCamFigure">
         <img class="staticCamImage" src="${esc(cam.src)}" alt="${esc(cam.label)}"
           referrerpolicy="no-referrer" data-cam-id="${esc(cam.id)}">
         <figcaption class="staticCamCaption">${esc(cam.tunnelName)} - ${esc(cam.label)}</figcaption>
-        ${index === 0 ? `<span class="cameraLiveBadge"><i></i>Live</span>` : ""}
+        <button type="button" class="cameraExpand" title="Forstørr kamerabildet" aria-label="Forstørr ${esc(cam.tunnelName)}">Vis bilde</button>
+        <span class="cameraError">Kamerabildet er utilgjengelig</span>
       </figure>`).join("");
-
-    dom.items.innerHTML = `<div class="staticCameraPanel">${figures}</div>`;
-    startCameraRefresh();
+    return `<div class="staticCameraPanel">${figures}</div>`;
   }
 
-  function isClosureMessage(msg) {
-    const rmt = String(msg?.roadManagementType || "").toLowerCase();
-    if (/roadclosed|carriagewayclosed|carriagewayblocked|laneblocked|roadblocked/.test(rmt)) return true;
-    const txt = `${msg?.title || ""} ${msg?.text || ""}`.toLowerCase();
-    return /stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt);
+  function bindCameraImages() {
+    dom.items.querySelectorAll(".staticCamImage").forEach(img => {
+      img.addEventListener("error", () => img.closest("figure").classList.add("cameraFailed"));
+      img.addEventListener("load", () => img.closest("figure").classList.remove("cameraFailed"));
+      img.closest("figure").querySelector("button").addEventListener("click", () => {
+        const dialog = document.createElement("dialog");
+        dialog.className = "cameraDialog";
+        const title = document.createElement("div");
+        title.textContent = img.closest("figure").querySelector("figcaption").textContent;
+        const close = document.createElement("button");
+        close.type = "button";
+        close.textContent = "Lukk";
+        close.addEventListener("click", () => dialog.close());
+        const image = document.createElement("img");
+        image.src = img.src;
+        image.alt = img.alt;
+        dialog.append(title, close, image);
+        document.body.append(dialog);
+        dialog.addEventListener("close", () => dialog.remove(), { once: true });
+        dialog.showModal();
+      });
+    });
   }
 
   function fmtClosedTime(iso) {
@@ -571,6 +599,10 @@
 
   function updateSourceHealth(element, sourceName, status) {
     if (!element) return;
+    const maxAge = sourceName === "Vegvesen" ? 3 * 60 * 1000 : 20 * 60 * 1000;
+    if (status?.state === "ok" && status.updated && measurementAge(status.updated) > maxAge) {
+      status = { ...status, state: "degraded", label: "Eldre data" };
+    }
     const state = ["ok", "degraded", "down"].includes(status?.state) ? status.state : "down";
     const dotClass = state === "ok" ? "healthy" : state === "degraded" ? "warning" : "unhealthy";
     const label = status?.label || (state === "ok" ? "OK" : "Utilgjengelig");
@@ -605,6 +637,7 @@
   }
 
   function isMessageActiveNow(message) {
+    if (message.isActive === false) return false;
     const validityStatus = String(message.validityStatus || "").toLowerCase();
     if (["suspended", "inactive", "closed", "cancelled", "cancelledbyoperator"].includes(validityStatus)) {
       return false;
@@ -631,6 +664,7 @@
     }
 
     for (const msg of relevantMessages) {
+      if (isPartialClosure(msg)) return "AVVIK";
       const tct = String(msg.trafficConstrictionType || "").toLowerCase();
       const rmt = String(msg.roadManagementType || "").toLowerCase();
       if (/lane.*blocked|partial|constrict|narrowing/.test(tct)) return "AVVIK";
@@ -646,21 +680,25 @@
 
   function normalizeTrafficFlow(flow) {
     if (!flow || typeof flow !== "object") {
-      return { level: "UNKNOWN", source: "unavailable", coverage: "unavailable" };
+      flow = {};
     }
 
+    const expired = measurementAge(flow.updated) > 60 * 60 * 1000;
+
     return {
-      level: flow.level || "UNKNOWN",
+      level: expired ? "UNKNOWN" : flow.level || "UNKNOWN",
       source: flow.source || "tomtom-flow",
       coverage: flow.coverage || "unavailable",
+      segmentId: flow.segmentId || "",
+      segmentLabel: flow.segmentLabel || "",
       currentRoadName: flow.currentRoadName || flow.routeDescription || "",
-      currentSpeed: flow.currentSpeed ?? null,
+      currentSpeed: expired ? null : flow.currentSpeed ?? null,
       freeFlowSpeed: flow.freeFlowSpeed ?? null,
       currentTravelTime: flow.currentTravelTime ?? null,
       freeFlowTravelTime: flow.freeFlowTravelTime ?? null,
       confidence: flow.confidence ?? null,
-      roadClosure: Boolean(flow.roadClosure),
-      segments: Array.isArray(flow.segments) ? flow.segments : [],
+      roadClosure: !expired && Boolean(flow.roadClosure),
+      segments: Array.isArray(flow.segments) ? flow.segments.map(normalizeTrafficFlow) : [],
       updated: flow.updated || ""
     };
   }
@@ -746,9 +784,19 @@
   }
 
   function formatDelay(seconds) {
-    if (!Number.isFinite(seconds) || seconds < 15) return "Ingen forsinkelse";
+    if (!Number.isFinite(seconds)) return "Ukjent forsinkelse";
+    if (seconds < 15) return "Ingen målt forsinkelse";
     if (seconds < 60) return `+${seconds} sek`;
     return `+${Math.ceil(seconds / 60)} min`;
+  }
+
+  function formatMeasurementAge(flow) {
+    const points = flow.segments.length ? flow.segments : [flow];
+    const ages = points.map(point => measurementAge(point.updated)).filter(Number.isFinite);
+    if (!ages.length) return "TomTom: ingen måling tilgjengelig";
+    const minutes = Math.floor(Math.max(...ages) / 60000);
+    const old = points.some(point => point.coverage === "stale-segment-point") || minutes >= 20;
+    return `${old ? "Sist kjente måling" : "Måling"}: ${minutes < 1 ? "nå" : `${minutes} min siden`}${minutes >= 60 ? " · for gammel til bruk" : ""}`;
   }
 
   function renderOverview() {
@@ -758,26 +806,27 @@
     const warningCount = statuses.filter(status => status === "AVVIK").length;
     const flows = Object.values(STATE.tunnelTrafficFlow).map(normalizeTrafficFlow);
     const measured = flows.filter(flow => flow.level !== "UNKNOWN");
-    const redCount = flows.filter(flow => flow.level === "RED").length;
+    const closureCount = flows.filter(flow => flow.roadClosure).length;
+    const redCount = flows.filter(flow => flow.level === "RED" && !flow.roadClosure).length;
     const yellowCount = flows.filter(flow => flow.level === "YELLOW").length;
     const activeEvents = getRelevantEventCount();
 
-    const tone = closedCount > 0 ? "bad" : warningCount > 0 || redCount > 0 || yellowCount > 0 ? "warn" : "good";
-    const signal = closedCount > 0 ? "Kritisk avvik" : warningCount > 0 ? "Trafikkavvik" : "Normal drift";
+    const tone = closedCount > 0 && STATE.statusFresh ? "bad" : !STATE.statusFresh || closureCount || warningCount || redCount || yellowCount ? "warn" : "good";
+    const signal = !STATE.statusFresh ? "Status må bekreftes" : closedCount > 0 ? "Stengning registrert" : closureCount ? "Kildene er uenige" : warningCount || redCount || yellowCount ? "Trafikkavvik" : "Normal drift";
     dom.overviewSignal.className = `overviewSignal ${tone}`;
     dom.overviewSignal.innerHTML = `<span class="overviewDot"></span>${signal}`;
-    dom.overviewTitle.textContent = closedCount > 0
+    dom.overviewTitle.textContent = !STATE.statusFresh ? "Tunnelstatus er ikke oppdatert" : closedCount > 0
       ? `${closedCount} ${closedCount === 1 ? "tunnel er" : "tunneler er"} stengt`
       : warningCount > 0
         ? `${warningCount} ${warningCount === 1 ? "tunnel har" : "tunneler har"} avvik`
-        : `${openCount} av ${statuses.length} tunneler er åpne`;
-    dom.overviewSub.textContent = closedCount || warningCount
+        : closureCount ? "Mulig stengning meldt av TomTom" : `Ingen stengninger registrert i ${statuses.length} tunneler`;
+    dom.overviewSub.textContent = !STATE.statusFresh ? "Viser sist kjente informasjon. Kontroller Vegvesen før avreise." : closureCount ? "Stengningsvarsel fra TomTom er ikke bekreftet av Vegvesen" : closedCount || warningCount
       ? "Se berørte tunneler og aktive meldinger nedenfor"
       : "Ingen registrerte stengninger eller tunnelavvik";
 
-    dom.summaryFlow.textContent = redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
-    dom.summaryFlow.className = redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
-    dom.summaryFlowDetail.textContent = redCount || yellowCount ? `${redCount + yellowCount} målinger med forsinkelse` : "Flyt nær normalnivå";
+    dom.summaryFlow.textContent = closureCount ? "Stengningsvarsel" : redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
+    dom.summaryFlow.className = closureCount ? "metricWarn" : redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
+    dom.summaryFlowDetail.textContent = closureCount ? "Meldt av TomTom" : redCount || yellowCount ? `${redCount + yellowCount} ${redCount + yellowCount === 1 ? "tunnel" : "tunneler"} med redusert flyt` : measured.length ? "Ingen målt forsinkelse" : "Ingen ferske trafikkmålinger";
     dom.summaryEvents.textContent = String(activeEvents);
     dom.summaryEventDetail.textContent = activeEvents === 1 ? "relevant hendelse" : "relevante hendelser";
   }
@@ -817,16 +866,17 @@
       const trafficFlow = normalizeTrafficFlow(STATE.tunnelTrafficFlow[key]);
       const trafficMeta = getRealTrafficFlowDisplayMeta(trafficFlow);
       const status = STATE.tunnelStatuses[key] || "ÅPEN";
-      const statusClass = 
+      const closureConflict = trafficFlow.roadClosure && status !== "STENGT";
+      const statusClass = !STATE.statusFresh ? "status-unknown" : closureConflict ? "status-warning" :
         status === "ÅPEN" ? "status-open" :
         status === "STENGT" ? "status-closed" : "status-warning";
       
-      const statusText = 
+      const statusText = !STATE.statusFresh ? "Ubekreftet" : closureConflict ? "Stengningsvarsel" :
         status === "ÅPEN" ? "Åpen" :
         status === "STENGT" ? "Stengt" : "Avvik";
       
       const tunnelMessages = (STATE.messagesByTunnel[key] || []).filter(isMessageActiveNow);
-      const reason = tunnelMessages.length > 0
+      const reason = closureConflict ? "TomTom melder stengning. Ikke bekreftet av Vegvesen." : tunnelMessages.length > 0
         ? (tunnelMessages[0].text || tunnelMessages[0].title)
         : "Ingen aktive meldinger";
       
@@ -863,7 +913,7 @@
             const value = segment?.currentSpeed != null && Number.isFinite(segmentSpeed)
               ? `${Math.round(segmentSpeed)}<small> km/t</small>`
               : "–";
-            const time = Number.isFinite(segmentTime) ? `ca. ${fmtDurationSeconds(segmentTime)}` : "Ingen tidsdata";
+            const time = segment.roadClosure ? "Stengningsvarsel" : Number.isFinite(segmentTime) ? `ca. ${fmtDurationSeconds(segmentTime)}` : "Ingen tidsdata";
             return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong><em>${time}</em></div>`;
           }).join("")
         : `
@@ -874,7 +924,7 @@
         <article class="tunnelItem ${statusClass}">
           <div class="tunnelTopline">
             <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
-            <span class="flowState ${trafficMeta.className}"><i></i>${trafficMeta.level} trafikk</span>
+            <span class="flowState ${trafficMeta.className}"><i></i>${trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
           </div>
           <div class="tunnelIdentity">
             <div>
@@ -886,9 +936,10 @@
             ${metricsHtml}
           </div>
           <div class="tunnelBottomline">
-            <span class="delay ${trafficMeta.className}">${formatDelay(delay)}</span>
+            <span class="delay ${trafficMeta.className}">${trafficFlow.roadClosure ? "Kontroller stengningsvarsel" : formatDelay(delay)}</span>
             <span class="tunnelReason">${esc(reason)}</span>
           </div>
+          <div class="measurementAge">${esc(formatMeasurementAge(trafficFlow))}</div>
         </article>
       `;
     }).join("");
@@ -904,8 +955,12 @@
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), CONFIG.apiTimeoutMs);
-      const response = await fetch(CONFIG.api, { cache: "no-store", signal: controller.signal });
-      clearTimeout(timeoutId);
+      let response;
+      try {
+        response = await fetch(CONFIG.api, { cache: "no-store", signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -913,8 +968,7 @@
       if (data.error) {
         console.error("API error:", data.error, data.message);
         updateHealth(false, `API-feil: ${data.error}`);
-        STATE.isRefreshing = false;
-        return;
+        throw new Error(data.error);
       }
 
       STATE.retryCount = 0;
@@ -923,6 +977,7 @@
         STATE.scheduledRetryId = null;
       }
       STATE.lastSuccessfulUpdate = new Date();
+      STATE.statusFresh = !data.stale && measurementAge(data.updated) < 3 * 60 * 1000;
       STATE.allMessages = data.stavanger?.messages || [];
       rebuildTunnelMessageIndex(STATE.allMessages);
       if (data.source !== "stale-cache") {
@@ -968,6 +1023,10 @@
       }
 
     } catch (err) {
+      STATE.statusFresh = false;
+      renderTunnelsGrid();
+      renderOverview();
+      updateGlobalTheme();
       STATE.retryCount++;
       console.error("Data fetch error:", err);
 
@@ -1019,6 +1078,12 @@
     if (currentMinute !== _lastTickMinute) {
       _lastTickMinute = currentMinute;
       renderRushHourBanner();
+      if (STATE.lastSuccessfulUpdate) {
+        if (Date.now() - STATE.lastSuccessfulUpdate.getTime() > 3 * 60 * 1000) STATE.statusFresh = false;
+        renderTunnelsGrid();
+        renderOverview();
+        updateGlobalTheme();
+      }
     }
   }
 

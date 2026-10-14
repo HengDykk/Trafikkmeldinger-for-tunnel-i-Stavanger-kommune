@@ -1,0 +1,10 @@
+{
+  "name": "trafikkmeldinger-flow",
+  "main": "traffic-coordinator.js",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": false,
+  "durable_objects": {
+    "bindings": [{ "name": "TOMTOM_COORDINATOR", "class_name": "TrafficCoordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TrafficCoordinator"] }]
+}

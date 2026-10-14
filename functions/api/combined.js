@@ -1,4 +1,5 @@
 // functions/api/combined.js
+import { isClosureMessage } from "../../traffic-rules.js";
 
 const MANUAL_TUNNEL_HISTORY_SEED = {
   byfjord: "2026-02-25T14:45:00+01:00",
@@ -11,7 +12,7 @@ const MANUAL_TUNNEL_HISTORY_SEED = {
   storhaug: "",
 };
 
-const TUNNEL_REGISTRY = {
+export const TUNNEL_REGISTRY = {
   byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", matchTerms: ["byfjordtunnelen", "byfjord"] },
   mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", matchTerms: ["mastrafjordtunnelen", "mastrafjord"] },
   eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", matchTerms: ["eiganestunnelen"] },
@@ -22,7 +23,7 @@ const TUNNEL_REGISTRY = {
   storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", matchTerms: ["storhaugtunnelen"] },
 };
 
-const TOMTOM_FLOW_POINTS = {
+export const TOMTOM_FLOW_POINTS = {
   byfjord: { lat: 59.040508, lon: 5.633805 },
   mastrafjord: { lat: 59.080372, lon: 5.690412 },
   // Separate E39 tubes north of the interchange, away from the Hundvag and Madlaveien ramps.
@@ -43,9 +44,6 @@ const TOMTOM_FLOW_POINTS = {
   storhaug: { lat: 58.961506, lon: 5.752038 },
 };
 
-const TOMTOM_REFRESH_MS = 15 * 60 * 1000;
-const TOMTOM_STALE_CACHE_SECONDS = 6 * 60 * 60;
-
 function normalizeHistorySeed(seed) {
   const out = {};
   for (const [key, value] of Object.entries(seed || {})) {
@@ -57,7 +55,7 @@ function normalizeHistorySeed(seed) {
   return out;
 }
 
-function classifyTomTomFlow(segment) {
+export function classifyTomTomFlow(segment) {
   if (!segment) return "UNKNOWN";
   if (segment.roadClosure) return "RED";
 
@@ -81,7 +79,7 @@ function classifyTomTomFlow(segment) {
   return "UNKNOWN";
 }
 
-function buildUnknownTomTomFlow(coverage = "unavailable") {
+export function buildUnknownTomTomFlow(coverage = "unavailable") {
   return {
     source: "tomtom-flow",
     coverage,
@@ -98,92 +96,6 @@ function buildUnknownTomTomFlow(coverage = "unavailable") {
   };
 }
 
-async function fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const cache = caches.default;
-  const pointId = point.id || tunnelKey;
-  const cacheKey = new Request(
-    `https://trafikkmeldinger.internal/tomtom-flow/${encodeURIComponent(tunnelKey)}/${encodeURIComponent(pointId)}.json`,
-    { method: "GET" }
-  );
-  const unknownForPoint = (coverage) => ({
-    ...buildUnknownTomTomFlow(coverage),
-    segmentId: pointId,
-    segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
-  });
-  let cachedFlow = null;
-
-  try {
-    const cachedResponse = await cache.match(cacheKey);
-    if (cachedResponse) {
-      cachedFlow = await cachedResponse.json().catch(() => null);
-      const cachedAt = new Date(cachedFlow?.updated || "").getTime();
-      if (cachedFlow && Number.isFinite(cachedAt) && Date.now() - cachedAt < TOMTOM_REFRESH_MS) {
-        return cachedFlow;
-      }
-    }
-
-    const url =
-      `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/14/json?key=${encodeURIComponent(apiKey)}` +
-      `&point=${point.lat},${point.lon}&unit=KMPH`;
-    const response = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Byfjordtunnelen/1.0 (Cloudflare Pages)",
-        Accept: "application/json",
-      },
-      cf: {
-        cacheTtl: Math.floor(TOMTOM_REFRESH_MS / 1000),
-        cacheEverything: true,
-      },
-    });
-
-    if (!response.ok) {
-      return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("api-error");
-    }
-
-    const payload = await response.json().catch(() => null);
-    const segment = payload?.flowSegmentData;
-    if (!segment || typeof segment !== "object") {
-      return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("missing-segment");
-    }
-
-    const flow = {
-      source: "tomtom-flow",
-      coverage: "segment-point",
-      segmentId: pointId,
-      segmentLabel: point.label || TUNNEL_REGISTRY[tunnelKey]?.name || "",
-      level: classifyTomTomFlow(segment),
-      routeDescription: segment.currentRoadName || TUNNEL_REGISTRY[tunnelKey]?.name || "",
-      currentRoadName: segment.currentRoadName || "",
-      currentSpeed: segment.currentSpeed,
-      freeFlowSpeed: segment.freeFlowSpeed,
-      currentTravelTime: segment.currentTravelTime,
-      freeFlowTravelTime: segment.freeFlowTravelTime,
-      confidence: segment.confidence,
-      roadClosure: Boolean(segment.roadClosure),
-      updated: new Date().toISOString(),
-    };
-
-    await cache.put(
-      cacheKey,
-      new Response(JSON.stringify(flow), {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": `public, max-age=${TOMTOM_STALE_CACHE_SECONDS}, s-maxage=${TOMTOM_STALE_CACHE_SECONDS}`,
-        },
-      })
-    );
-
-    return flow;
-  } catch {
-    return cachedFlow ? { ...cachedFlow, coverage: "stale-segment-point" } : unknownForPoint("request-failed");
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 function getTomTomFlowScore(flow) {
   const levelScore = { UNKNOWN: 0, GREEN: 1, YELLOW: 2, RED: 3 }[flow?.level] || 0;
@@ -195,7 +107,7 @@ function getTomTomFlowScore(flow) {
   return levelScore * 10 + speedLoss;
 }
 
-function aggregateTomTomFlows(flows) {
+export function aggregateTomTomFlows(flows) {
   const segments = flows.filter(Boolean);
   const available = segments.filter((flow) => flow.level !== "UNKNOWN");
   if (!available.length) {
@@ -210,30 +122,19 @@ function aggregateTomTomFlows(flows) {
   };
 }
 
-async function fetchTomTomTrafficData(env, timeoutMs) {
+async function fetchTomTomTrafficData(env) {
   const apiKey = String(env.TOMTOM_API_KEY || "").trim();
-  if (!apiKey) {
-    return Object.fromEntries(
-      Object.keys(TUNNEL_REGISTRY).map((key) => [key, buildUnknownTomTomFlow("missing-api-key")])
-    );
-  }
-
-  const entries = await Promise.all(
-    Object.entries(TUNNEL_REGISTRY).map(async ([tunnelKey]) => {
-      const configuredPoints = TOMTOM_FLOW_POINTS[tunnelKey];
-      if (!configuredPoints) {
-        return [tunnelKey, buildUnknownTomTomFlow("unconfigured-point")];
-      }
-      const points = Array.isArray(configuredPoints) ? configuredPoints : [configuredPoints];
-      const flows = await Promise.all(
-        points.map((point) => fetchTomTomFlowForPoint(apiKey, point, tunnelKey, timeoutMs))
-      );
-      const flow = points.length > 1 ? aggregateTomTomFlows(flows) : flows[0];
-      return [tunnelKey, flow];
-    })
+  const unknown = (coverage) => Object.fromEntries(
+    Object.keys(TUNNEL_REGISTRY).map(key => [key, buildUnknownTomTomFlow(coverage)])
   );
-
-  return Object.fromEntries(entries);
+  if (!apiKey) return unknown("missing-api-key");
+  if (!env.TOMTOM_COORDINATOR) return unknown("coordinator-not-configured");
+  try {
+    return await env.TOMTOM_COORDINATOR.getByName("traffic-api-key-quota").getTraffic(apiKey);
+  } catch {
+    // Never bypass the central budget after a coordinator failure.
+    return unknown("coordinator-unavailable");
+  }
 }
 
 function getTomTomSourceStatus(travelFlowByTunnel) {
@@ -241,7 +142,7 @@ function getTomTomSourceStatus(travelFlowByTunnel) {
     Array.isArray(flow?.segments) ? flow.segments : [flow]
   ).filter(Boolean);
   const available = points.filter((flow) => flow.level && flow.level !== "UNKNOWN");
-  const stale = available.filter((flow) => flow.coverage === "stale-segment-point");
+  const stale = available.filter((flow) => flow.coverage === "stale-segment-point" || Date.now() - Date.parse(flow.updated || "") > 20 * 60 * 1000);
   const latestUpdate = available
     .map((flow) => flow.updated)
     .filter(Boolean)
@@ -479,13 +380,6 @@ export async function onRequest(context) {
       return true;
     }
 
-    function isClosureMessage(m) {
-      const rmt = String(m.roadManagementType || "").toLowerCase();
-      if (/roadclosed|carriagewayclosed|carriagewayblocked|laneblocked|roadblocked/.test(rmt)) return true;
-      const txt = `${m.title || ""} ${m.text || ""}`.toLowerCase();
-      return /stengt|steng[te]|closed?|closure|sperr[et]|blocked?|impassable|ikke farbar/.test(txt);
-    }
-
     function messageMatchesTunnel(m, tunnelKey) {
       const tunnel = TUNNEL_REGISTRY[tunnelKey];
       if (!tunnel) return false;
@@ -522,8 +416,7 @@ export async function onRequest(context) {
     const activeMessages = messagesClean.filter((m) => isActiveNow(m) || isRecentPoliceMessage(m));
     const stavangerOnly = activeMessages.filter(isStavanger);
     const localOnly = stavangerOnly
-      .sort((a, b) => new Date(b.time || b.versionTime || 0).getTime() - new Date(a.time || a.versionTime || 0).getTime())
-      .slice(0, 50);
+      .sort((a, b) => new Date(b.versionTime || b.time || 0).getTime() - new Date(a.versionTime || a.time || 0).getTime());
 
     const nowIso = new Date().toISOString();
     const tunnelHistory = { ...seedHistory, ...previousHistory };
@@ -585,7 +478,7 @@ export async function onRequest(context) {
           cacheEverything: true,
         },
       }),
-      fetchTomTomTrafficData(env, timeoutMs),
+      fetchTomTomTrafficData(env),
       fetchPolitiloggenTrafficMessages(timeoutMs),
     ]);
 
@@ -647,7 +540,12 @@ export async function onRequest(context) {
           detail: "DATEX-data mottatt fra Statens vegvesen",
           updated: new Date().toISOString(),
         },
-        tomtom: getTomTomSourceStatus(travelFlowByTunnel),
+        tomtom: {
+          ...getTomTomSourceStatus(travelFlowByTunnel),
+          quotaControlled: Boolean(env.TOMTOM_COORDINATOR),
+          refreshMinutes: 15,
+          rollingDayBudget: 2000,
+        },
       },
       source: "live",
       stale: false,
@@ -853,7 +751,6 @@ function extractMessagesFromDatex(xml) {
       recordType,
     });
 
-    if (messages.length >= 80) break;
   }
 
   return messages;
