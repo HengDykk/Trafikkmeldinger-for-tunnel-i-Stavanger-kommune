@@ -21,6 +21,16 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     tunnelHistoryCacheKey: "byfjord:lastClosedByTunnel"
   };
 
+  const OSLO = "Europe/Oslo";
+  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const osloClock = new Intl.DateTimeFormat("en-GB", { timeZone: OSLO, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+  // Ukedag og minutter siden midnatt i norsk tid, uavhengig av enhetens tidssone.
+  function osloNow(now = new Date()) {
+    const parts = Object.fromEntries(osloClock.formatToParts(now).map(part => [part.type, part.value]));
+    return { day: WEEKDAYS.indexOf(parts.weekday), minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+  }
+
   const TUNNELS = {
     byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, speedLimit: 80, cameras: [{ id: "byfjord_nord", label: "Mot Stavanger/Randaberg" }, { id: "byfjord_sor", label: "Mot innløpet retning nord" }] },
     mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, speedLimit: 80, cameras: [] },
@@ -134,10 +144,8 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
   }
 
   function getRushHourStatus() {
-    const now = new Date();
-    const day = now.getDay();
+    const { day, minutes: todayMin } = osloNow();
     const isWeekday = day >= 1 && day <= 5;
-    const todayMin = now.getHours() * 60 + now.getMinutes();
     const MORN_START = 390; // 06:30
     const MORN_END   = 540; // 09:00
     const AFT_START  = 900; // 15:00
@@ -514,6 +522,7 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
       if (Number.isNaN(d.getTime())) return "Ukjent";
 
       return d.toLocaleString("no-NO", {
+        timeZone: OSLO,
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
@@ -903,13 +912,14 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
         <article class="tunnelItem ${statusClass}">
           <div class="tunnelTopline">
             <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
-            <span class="flowState ${trafficMeta.className}"><i></i>${status === "STENGT" ? "Vegvesen" : trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
+            <h3 class="tunnelItemName">${tunnel.name}</h3>
           </div>
           <div class="tunnelIdentity">
-            <div>
-              <h3 class="tunnelItemName">${tunnel.name}</h3>
+            <div class="tunnelIdentityRow">
               <span class="tunnelItemLength">${lengthText}</span>
+              <span class="flowState ${trafficMeta.className}"><i></i>${status === "STENGT" ? "Vegvesen" : trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
             </div>
+            <div class="measurementAge">${status === "STENGT" ? sourceLink : esc(formatMeasurementAge(trafficFlow))}</div>
           </div>
           <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
             ${metricsHtml}
@@ -918,7 +928,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
             <span class="delay ${trafficMeta.className}">${status === "STENGT" ? STATE.statusFresh ? "Bekreftet stengt" : "Sist meldt stengt" : trafficFlow.roadClosure ? "Kontroller stengningsvarsel" : formatDelay(delay)}</span>
             <span class="tunnelReason">${esc(reason)}</span>
           </div>
-          <div class="measurementAge">${status === "STENGT" ? sourceLink : esc(formatMeasurementAge(trafficFlow))}</div>
         </article>
       `;
     }).join("");
@@ -1045,15 +1054,15 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     const now = new Date();
     if (dom.clock) {
       dom.clock.textContent = now.toLocaleTimeString("no-NO", {
-        hour: "2-digit", minute: "2-digit", second: "2-digit"
+        timeZone: OSLO, hour: "2-digit", minute: "2-digit", second: "2-digit"
       });
     }
     if (dom.date) {
       dom.date.textContent = now.toLocaleDateString("no-NO", {
-        weekday: "short", day: "numeric", month: "short"
+        timeZone: OSLO, weekday: "short", day: "numeric", month: "short"
       });
     }
-    const currentMinute = now.getHours() * 60 + now.getMinutes();
+    const currentMinute = osloNow(now).minutes;
     if (currentMinute !== _lastTickMinute) {
       _lastTickMinute = currentMinute;
       renderRushHourBanner();
