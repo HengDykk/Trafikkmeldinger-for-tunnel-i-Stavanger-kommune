@@ -22,28 +22,16 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
   };
 
   const OSLO = "Europe/Oslo";
-  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const osloClock = new Intl.DateTimeFormat("en-GB", { timeZone: OSLO, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-
-  // Ukedag og minutter siden midnatt i norsk tid, uavhengig av enhetens tidssone.
-  function osloNow(now = new Date()) {
-    const parts = Object.fromEntries(osloClock.formatToParts(now).map(part => [part.type, part.value]));
-    return { day: WEEKDAYS.indexOf(parts.weekday), minutes: Number(parts.hour) * 60 + Number(parts.minute) };
-  }
-
   const TUNNELS = {
     byfjord: { id: "10-8383248394a8c41b", name: "Byfjordtunnelen", keywords: ["byfjordtunnelen", "byfjord"], length: 5875, speedLimit: 80, cameras: [{ id: "byfjord_nord", label: "Mot Stavanger/Randaberg" }, { id: "byfjord_sor", label: "Mot innløpet retning nord" }] },
     mastrafjord: { id: "10-31b9ef1302194439", name: "Mastrafjordtunnelen", keywords: ["mastrafjordtunnelen", "mastrafjord"], length: 4424, speedLimit: 80, cameras: [] },
     eiganes: { id: "10-3e9b280fc15f0540", name: "Eiganestunnelen", keywords: ["eiganestunnelen"], length: 3700, speedLimit: 80, cameras: [{ id: "eiganes_e39", label: "E39 mot Sandnes" }, { id: "eiganes", label: "Retning Sentrum" }] },
-    hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 5700, speedLimit: 80 },
+    hundvag: { id: "10-746700d70a0dd7cd", name: "Hundvågtunnelen", keywords: ["hundvågtunnelen", "hundvagtunnelen"], length: 5700, speedLimit: 80, cameras: [{ id: "hundvag_sandnes", label: "Utløp Hundvåg/Eiganes mot Sandnes" }] },
     ryfast: { id: "10-e0a2a18ca95b06c6", name: "Ryfylketunnelen", keywords: ["ryfylketunnelen", "ryfast"], length: 14300, speedLimit: 80, cameras: [] },
-    finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685, speedLimit: 80 },
+    finnoy: { id: "10-92a98043d0a97d1e", name: "Finnøytunnelen", keywords: ["finnøytunnelen", "finnoytunnelen", "finnfast"], length: 5685, speedLimit: 80, cameras: [] },
     talgje: { id: "10-cbdb03f70d66c4c3", name: "Talgjetunnelen", keywords: ["talgjetunnelen"], length: 1467, speedLimit: 80, cameras: [] },
     storhaug: { id: "10-201a7ab572b246cd", name: "Storhaugtunnelen", keywords: ["storhaugtunnelen"], length: 1100, speedLimit: 50, cameras: [] }
   };
-
-  TUNNELS.hundvag.cameras = [{ id: "hundvag_sandnes", label: "Utløp Hundvåg/Eiganes mot Sandnes" }];
-  TUNNELS.finnoy.cameras = [];
 
   const STATE = {
     retryCount: 0,
@@ -56,8 +44,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     scheduledRetryId: null,
     lastClosedAtByTunnel: {},
     progressAnimId: null,
-    scrollAnimId: null,
-    scrollPauseId: null,
     cameraRefreshId: null,
     statusFresh: false
   };
@@ -83,7 +69,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     summaryFlow: el("summaryFlow"),
     summaryFlowDetail: el("summaryFlowDetail"),
     summaryEvents: el("summaryEvents"),
-    summaryEventDetail: el("summaryEventDetail")
+    summaryEventDetail: el("summaryEventDetail"),
+    summaryDelay: el("summaryDelay"),
+    summaryDelayDetail: el("summaryDelayDetail")
   };
 
   Object.keys(TUNNELS).forEach(key => { STATE.tunnelStatuses[key] = "ÅPEN"; });
@@ -135,50 +123,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     return `${m.time || ""}|${(m.title || "").trim()}|${(m.text || "").trim()}`;
   }
 
-  function fmtMinutes(mins) {
-    if (mins <= 1) return "snart";
-    if (mins < 60) return `${mins} min`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m > 0 ? `${h} t ${m} min` : `${h} t`;
-  }
-
-  function getRushHourStatus() {
-    const { day, minutes: todayMin } = osloNow();
-    const isWeekday = day >= 1 && day <= 5;
-    const MORN_START = 390; // 06:30
-    const MORN_END   = 540; // 09:00
-    const AFT_START  = 900; // 15:00
-    const AFT_END    = 1080; // 18:00
-
-    if (!isWeekday) {
-      const nextDay = day === 6 ? "mandag" : "i morgen";
-      return { label: "Helg", className: "rush-weekend", detail: `Morgenrush ${nextDay} 06:30` };
-    }
-    if (todayMin >= MORN_START && todayMin < MORN_END) {
-      return { label: "Morgenrush", className: "rush-active", detail: `Slutter om ${fmtMinutes(MORN_END - todayMin)}` };
-    }
-    if (todayMin >= AFT_START && todayMin < AFT_END) {
-      return { label: "Ettermiddagsrush", className: "rush-active", detail: `Slutter om ${fmtMinutes(AFT_END - todayMin)}` };
-    }
-    if (todayMin < MORN_START) {
-      return { label: "Stille periode", className: "rush-quiet", detail: `Morgenrush starter om ${fmtMinutes(MORN_START - todayMin)}` };
-    }
-    if (todayMin < AFT_START) {
-      return { label: "Stille periode", className: "rush-quiet", detail: `Ettermiddagsrush starter om ${fmtMinutes(AFT_START - todayMin)}` };
-    }
-    const tomorrowIsWeekday = ((day + 1) % 7) >= 1 && ((day + 1) % 7) <= 5;
-    return { label: "Stille periode", className: "rush-quiet", detail: tomorrowIsWeekday ? "Morgenrush i morgen 06:30" : "Morgenrush mandag 06:30" };
-  }
-
-  function renderRushHourBanner() {
-    const banner = document.getElementById("rushHourBanner");
-    if (!banner) return;
-    const s = getRushHourStatus();
-    banner.className = `rushHourBanner ${s.className}`;
-    banner.innerHTML = `<span class="rushLabel">${s.label}</span><span class="rushDetail">${s.detail}</span>`;
-  }
-
   function messageItemHtml(m) {
     const sev = String(m.severity || "").toUpperCase();
     const cls = (sev === "HIGH" || sev === "HIGHEST") ? "bad" : sev === "MEDIUM" ? "warn" : "info";
@@ -204,75 +148,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     return getRelevantEventCount() > 0;
   }
 
-  function renderIdlePanel() {
-    if (!dom.items) return;
-    stopAutoScroll();
-    if (dom.eventCount) dom.eventCount.textContent = "Ingen tunnelhendelser";
-
-    const rows = Object.entries(TUNNELS).map(([key, tunnel]) => {
-      const flow = STATE.tunnelTrafficFlow[key] || { level: "UNKNOWN" };
-      const status = STATE.tunnelStatuses[key] || "ÅPEN";
-      const dotCls = STATUS_CLASS[status] || "status-open";
-      const levelCls = flow.level === "RED" ? "traffic-red" : flow.level === "YELLOW" ? "traffic-yellow" : flow.level === "UNKNOWN" ? "traffic-unknown" : "traffic-green";
-
-      const curSpd = Number(flow.currentSpeed);
-      const freeSpd = Number(flow.freeFlowSpeed);
-      const speedTxt = Number.isFinite(curSpd) && Number.isFinite(freeSpd)
-        ? `${Math.round(curSpd)}&thinsp;/&thinsp;${Math.round(freeSpd)} km/t`
-        : "—";
-
-      const curTime = fmtDurationSeconds(flow.currentTravelTime);
-      const freeTime = fmtDurationSeconds(flow.freeFlowTravelTime);
-      const timeTxt = curTime || "—";
-      const timeExtra = (curTime && freeTime && curTime !== freeTime)
-        ? ` <span class="reisetidNormal">norm. ${freeTime}</span>` : "";
-
-      const lastClosed = status !== "STENGT" ? STATE.lastClosedAtByTunnel[key] : null;
-      const closureTxt = lastClosed ? `Sist stengt: ${fmtClosedTime(lastClosed)}` : "";
-
-      return `
-        <div class="reisetidRow ${levelCls}">
-          <div class="reisetidLeft">
-            <div class="reisetidName">
-              <div class="tunnelGroupDot ${dotCls}"></div>
-              ${esc(tunnel.name)}
-            </div>
-            ${closureTxt ? `<div class="reisetidMeta">${esc(closureTxt)}</div>` : ""}
-          </div>
-          <div class="reisetidRight">
-            <div class="reisetidSpeed">${speedTxt}</div>
-            <div class="reisetidTime ${levelCls}">${timeTxt}${timeExtra}</div>
-          </div>
-        </div>`;
-    }).join("");
-
-    dom.items.innerHTML = `<div class="reisetidTable">${rows}</div>`;
-  }
-
-  function renderSpotlightCamera(tunnelKey, cameras) {
-    if (!dom.items) return;
-    stopAutoScroll();
-    const tunnel = TUNNELS[tunnelKey];
-    if (dom.eventCount) dom.eventCount.textContent = "Live kamera";
-
-    const imagesHtml = cameras.map(cam => `
-      <figure class="spotlightFigure">
-        <img class="spotlightImage" src="${esc(cam.src)}" alt="${esc(cam.label)}" referrerpolicy="no-referrer">
-        <figcaption class="spotlightCaption">${esc(cam.label)}</figcaption>
-      </figure>`).join("");
-
-    dom.items.innerHTML = `
-      <div class="spotlightPanel">
-        <div class="spotlightHeader">
-          <span class="spotlightTitle">Live kamera</span>
-          <span class="spotlightTunnel">${esc(tunnel.name)}</span>
-        </div>
-        <div class="spotlightImages${cameras.length === 1 ? " single" : ""}">
-          ${imagesHtml}
-        </div>
-      </div>`;
-  }
-
   function updateRightPanel() {
     if (hasAnyRelevantMessages()) {
       stopCameraRefresh();
@@ -284,7 +159,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
 
   function renderMessagePanel() {
     if (!dom.items) return;
-    stopAutoScroll();
 
     // Build tunnel groups — messages that match a specific tunnel
     const groups = [];
@@ -295,12 +169,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
       }
     }
 
-    // Update event count
     if (dom.eventCount) {
-      const n = groups.length;
-      dom.eventCount.textContent = n > 0
-        ? `${n} tunnel${n === 1 ? "hendelse" : "hendelser"}`
-        : "Ingen tunnelhendelser";
+      const n = getRelevantEventCount();
+      dom.eventCount.textContent = n > 0 ? `${n} ${n === 1 ? "hendelse" : "hendelser"}` : "Ingen tunnelhendelser";
     }
 
     let html = "";
@@ -337,34 +208,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     STATE.progressAnimId = requestAnimationFrame(animate);
   }
 
-  function stopAutoScroll() {
-    if (STATE.scrollAnimId) { cancelAnimationFrame(STATE.scrollAnimId); STATE.scrollAnimId = null; }
-    if (STATE.scrollPauseId) { clearTimeout(STATE.scrollPauseId); STATE.scrollPauseId = null; }
-  }
-
-  function startAutoScroll() {
-    stopAutoScroll();
-    const items = dom.items;
-    if (!items || items.scrollHeight <= items.clientHeight + 4) return;
-    items.scrollTop = 0;
-    const SPEED = 0.35;
-    const scroll = () => {
-      if (!items) return;
-      if (items.scrollTop + items.clientHeight >= items.scrollHeight - 4) {
-        STATE.scrollPauseId = setTimeout(() => {
-          items.scrollTo({ top: 0, behavior: "smooth" });
-          STATE.scrollPauseId = setTimeout(startAutoScroll, 1800);
-        }, 3500);
-        return;
-      }
-      items.scrollTop += SPEED;
-      STATE.scrollAnimId = requestAnimationFrame(scroll);
-    };
-    STATE.scrollPauseId = setTimeout(() => {
-      STATE.scrollAnimId = requestAnimationFrame(scroll);
-    }, 2500);
-  }
-
   function getWeatherIcon(symbolCode) {
     if (!symbolCode) return "";
     const base = symbolCode.replace(/_(day|night|polartwilight)$/, "");
@@ -382,15 +225,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
       lightrainshowersandthunder: "⛈️", rainshowersandthunder: "⛈️"
     };
     return map[base] || "🌡️";
-  }
-
-  function getTrendArrow(trendType) {
-    switch (String(trendType || "").toUpperCase()) {
-      case "INCREASING": return `<span class="trendArrow trend-up">↑</span>`;
-      case "DECREASING": return `<span class="trendArrow trend-down">↓</span>`;
-      case "STABLE":     return `<span class="trendArrow trend-stable">→</span>`;
-      default: return "";
-    }
   }
 
   function updateGlobalTheme() {
@@ -414,16 +248,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
 
   function esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  function getTunnelCameraSources(tunnelKey) {
-    const tunnel = TUNNELS[tunnelKey];
-    const cameras = Array.isArray(tunnel?.cameras) ? tunnel.cameras : [];
-    const cacheBuster = Date.now();
-    return cameras.map((camera) => ({
-      ...camera,
-      src: `/api/cam?id=${encodeURIComponent(camera.id)}&t=${cacheBuster}`
-    }));
   }
 
   function getAllCameraSources() {
@@ -462,10 +286,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
 
   function renderStaticCameraPanel() {
     if (!dom.items) return;
-    stopAutoScroll();
 
     const cameras = getAllCameraSources();
-    if (!cameras.length) { renderIdlePanel(); return; }
+    if (!cameras.length) return;
 
     if (dom.eventCount) dom.eventCount.innerHTML = `<span class="liveDot"></span>Direktebilder`;
 
@@ -532,22 +355,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     } catch {
       return "Ukjent";
     }
-  }
-
-  function getTunnelMetaText(messages) {
-    if (!messages.length) return "Ingen aktiv melding";
-
-    const primary = messages[0];
-    if (primary?.overallEndTime) {
-      return `Gyldig til: ${fmtClosedTime(primary.overallEndTime)}`;
-    }
-
-    const updatedAt = primary?.versionTime || primary?.time;
-    if (updatedAt) {
-      return `Oppdatert: ${fmtClosedTime(updatedAt)}`;
-    }
-
-    return "Aktiv melding";
   }
 
   async function loadWeather() {
@@ -697,70 +504,12 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     return Math.round((length / 1000 / speed) * 3600);
   }
 
-  function getRealTrafficFlowDisplayMeta(flow) {
-    switch (flow?.level) {
-      case "RED":
-        return {
-          className: "traffic-red",
-          level: "Høy",
-          icon: "🔴",
-          description: "Høy trafikkbelastning basert på TomTom sanntidsdata"
-        };
-      case "YELLOW":
-        return {
-          className: "traffic-yellow",
-          level: "Middels",
-          icon: "🟡",
-          description: "Middels trafikkbelastning basert på TomTom sanntidsdata"
-        };
-      case "UNKNOWN":
-        return {
-          className: "traffic-unknown",
-          level: "Ingen data",
-          icon: "⚪",
-          description: "Ingen sanntidsmåling fra TomTom for denne tunnelen"
-        };
-      default:
-        return {
-          className: "traffic-green",
-          level: "Lav",
-          icon: "🟢",
-          description: "Lav trafikkbelastning basert på TomTom sanntidsdata"
-        };
-    }
-  }
-
-  function getTrafficFlowDetails(flow) {
-    if (!flow || flow.level === "UNKNOWN") {
-      return "Ingen sanntidsmåling tilgjengelig fra TomTom for denne tunnelen.";
-    }
-
-    const parts = [];
-    if (flow.currentRoadName) {
-      parts.push(`Målt på ${flow.currentRoadName}.`);
-    }
-
-    const currentSpeed = Number(flow.currentSpeed);
-    const freeFlowSpeed = Number(flow.freeFlowSpeed);
-    if (Number.isFinite(currentSpeed) && Number.isFinite(freeFlowSpeed)) {
-      parts.push(`Hastighet ${Math.round(currentSpeed)} km/t mot normal ${Math.round(freeFlowSpeed)} km/t.`);
-    }
-
-    const currentTravelTime = fmtDurationSeconds(flow.currentTravelTime);
-    const freeFlowTravelTime = fmtDurationSeconds(flow.freeFlowTravelTime);
-    if (currentTravelTime && freeFlowTravelTime) {
-      parts.push(`Reisetid ${currentTravelTime} mot fri flyt ${freeFlowTravelTime}.`);
-    }
-
-    return parts.join(" ");
-  }
-
-  function getDelaySeconds(flow) {
-    const current = Number(flow?.currentTravelTime);
-    const free = Number(flow?.freeFlowTravelTime);
-    if (!Number.isFinite(current) || !Number.isFinite(free)) return null;
-    return Math.max(0, Math.round(current - free));
-  }
+  const FLOW_META = {
+    RED: { className: "traffic-red", level: "Høy" },
+    YELLOW: { className: "traffic-yellow", level: "Middels" },
+    GREEN: { className: "traffic-green", level: "Lav" },
+    UNKNOWN: { className: "traffic-unknown", level: "Ingen data" }
+  };
 
   function formatDelay(seconds) {
     if (!Number.isFinite(seconds)) return "Ukjent forsinkelse";
@@ -769,13 +518,43 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     return `+${Math.ceil(seconds / 60)} min`;
   }
 
-  function formatMeasurementAge(flow) {
+  // Ferske målinger trenger ingen merknad; bare gamle verdier forklares på kortet.
+  function staleMeasurementNote(flow) {
     const points = flow.segments.length ? flow.segments : [flow];
     const ages = points.map(point => measurementAge(point.updated)).filter(Number.isFinite);
-    if (!ages.length) return "TomTom: ingen måling tilgjengelig";
+    if (!ages.length) return "";
     const minutes = Math.floor(Math.max(...ages) / 60000);
     const old = points.some(point => point.coverage === "stale-segment-point") || minutes >= 20;
-    return `${old ? "Sist kjente måling" : "Måling"}: ${minutes < 1 ? "nå" : `${minutes} min siden`}${minutes >= 60 ? " · for gammel til bruk" : ""}`;
+    if (!old) return "";
+    return `Sist kjente måling: ${minutes} min siden${minutes >= 60 ? " · for gammel til bruk" : ""}`;
+  }
+
+  function fmtDate(iso) {
+    const d = new Date(iso || "");
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("no-NO", { timeZone: OSLO, day: "numeric", month: "short", year: "numeric" });
+  }
+
+  // Fart, kjøretid og forsinkelse for én tunnel. Med to retninger gjelder den tregeste.
+  function getTunnelFlowSummary(tunnel, flow) {
+    const speed = flow.currentSpeed == null ? null : Number(flow.currentSpeed);
+    const segments = flow.segments.slice(0, 2);
+    const segmentTimes = segments
+      .map(segment => estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed))
+      .filter(Number.isFinite);
+    const segmentDelays = segments
+      .map(segment => {
+        const current = estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed);
+        const freeFlow = estimateTunnelTravelTime(tunnel.length, segment?.freeFlowSpeed);
+        return Number.isFinite(current) && Number.isFinite(freeFlow) ? Math.max(0, current - freeFlow) : null;
+      })
+      .filter(Number.isFinite);
+    const travelTime = segmentTimes.length ? Math.max(...segmentTimes) : estimateTunnelTravelTime(tunnel.length, speed);
+    const freeFlowTime = estimateTunnelTravelTime(tunnel.length, flow.freeFlowSpeed ?? tunnel.speedLimit);
+    const delay = segmentDelays.length
+      ? Math.max(...segmentDelays)
+      : Number.isFinite(travelTime) && Number.isFinite(freeFlowTime) ? Math.max(0, travelTime - freeFlowTime) : null;
+    return { speed, segments, travelTime, delay, hasFlow: Number.isFinite(travelTime) };
   }
 
   function renderOverview() {
@@ -807,9 +586,23 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
 
     dom.summaryFlow.textContent = closedCount ? "Stengt" : closureCount ? "Stengningsvarsel" : redCount > 0 ? "Kraftig kø" : yellowCount > 0 ? "Noe kø" : measured.length ? "Normal" : "Ukjent";
     dom.summaryFlow.className = closedCount ? "metricBad" : closureCount ? "metricWarn" : redCount > 0 ? "metricBad" : yellowCount > 0 ? "metricWarn" : measured.length ? "metricGood" : "";
-    dom.summaryFlowDetail.textContent = closedCount ? "Bekreftet av Vegvesen" : closureCount ? "Meldt av TomTom" : redCount || yellowCount ? `${redCount + yellowCount} ${redCount + yellowCount === 1 ? "tunnel" : "tunneler"} med redusert flyt` : measured.length ? "Ingen målt forsinkelse" : "Ingen ferske trafikkmålinger";
+    dom.summaryFlowDetail.textContent = closedCount ? "Bekreftet av Vegvesen" : closureCount ? "Meldt av TomTom" : redCount || yellowCount ? `${redCount + yellowCount} ${redCount + yellowCount === 1 ? "tunnel" : "tunneler"} med redusert flyt` : measured.length ? "Normal fart i målte tunneler" : "Ingen ferske trafikkmålinger";
     dom.summaryEvents.textContent = String(activeEvents);
     dom.summaryEventDetail.textContent = activeEvents === 1 ? "relevant hendelse" : "relevante hendelser";
+
+    const delays = Object.entries(TUNNELS)
+      .filter(([key]) => STATE.tunnelStatuses[key] !== "STENGT")
+      .map(([key, tunnel]) => {
+        const flow = normalizeTrafficFlow(STATE.tunnelTrafficFlow[key]);
+        return { name: tunnel.name, level: flow.level, delay: getTunnelFlowSummary(tunnel, flow).delay };
+      })
+      .filter(entry => Number.isFinite(entry.delay))
+      .sort((a, b) => b.delay - a.delay);
+    const worst = delays[0];
+    const delayed = worst && worst.delay >= 15;
+    dom.summaryDelay.textContent = !worst ? "–" : delayed ? formatDelay(worst.delay) : "Ingen";
+    dom.summaryDelay.className = !delayed ? "" : worst.level === "RED" ? "metricBad" : worst.level === "YELLOW" ? "metricWarn" : "";
+    dom.summaryDelayDetail.textContent = !worst ? "Ingen ferske trafikkmålinger" : delayed ? worst.name : "Ingen målt forsinkelse";
   }
 
   function updateTunnelClosureHistory(defaultTimeIso) {
@@ -840,99 +633,76 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
     STATE.messagesByTunnel = next;
   }
 
+  function renderTunnelCard(key, tunnel) {
+    const flow = normalizeTrafficFlow(STATE.tunnelTrafficFlow[key]);
+    const flowMeta = FLOW_META[flow.level] || FLOW_META.GREEN;
+    const status = STATE.tunnelStatuses[key] || "ÅPEN";
+    const closed = status === "STENGT";
+    const closureConflict = flow.roadClosure && !closed;
+    const statusClass = !STATE.statusFresh ? "status-unknown" : closureConflict ? "status-warning" : STATUS_CLASS[status] || "status-warning";
+    const statusText = !STATE.statusFresh ? "Ubekreftet" : closureConflict ? "Stengningsvarsel" :
+      closed ? "Stengt" : status === "ÅPEN" ? "Åpen" : "Avvik";
+
+    const messages = (STATE.messagesByTunnel[key] || []).filter(isMessageActiveNow);
+    const closureMessage = messages.find(isClosureMessage);
+    const reason = closureMessage
+      ? closureMessage.versionTime ? `Endret ${fmtClosedTime(closureMessage.versionTime)}` : closureMessage.eventDescription || closureMessage.title
+      : closureConflict ? "TomTom melder stengning. Ikke bekreftet av Vegvesen."
+      : messages.length ? messages[0].text || messages[0].title : "";
+
+    const { speed, segments, travelTime, delay, hasFlow } = getTunnelFlowSummary(tunnel, flow);
+    const delayText = closed ? STATE.statusFresh ? "Bekreftet stengt" : "Sist meldt stengt"
+      : flow.roadClosure ? "Kontroller stengningsvarsel"
+      : Number.isFinite(delay) && delay >= 15 ? formatDelay(delay) : "";
+
+    // Rolige kort viser bare status og måling; merker og notater kommer når noe avviker.
+    const flowBadge = closed ? "" : flow.roadClosure ? "TomTom-varsel" : flow.level === "UNKNOWN" ? "Ingen måling" : flow.level === "GREEN" ? "" : `${flowMeta.level} trafikk`;
+    const lastClosed = closed ? "" : fmtDate(STATE.lastClosedAtByTunnel[key]);
+    const sourceLink = closed && closureMessage?.situationId
+      ? `<a class="closureSource" href="https://www.vegvesen.no/trafikk/trafikkmeldinger/${encodeURIComponent(closureMessage.situationId)}" target="_blank" rel="noopener noreferrer">Melding hos Vegvesen</a>` : "";
+    const staleNote = closed ? "" : staleMeasurementNote(flow);
+
+    const endTime = closureMessage?.overallEndTime ? new Date(closureMessage.overallEndTime) : null;
+    const hasEndTime = endTime && Number.isFinite(endTime.getTime());
+    const metricsHtml = closed
+      ? `<div class="tunnelMetric"><span>Forventet åpning</span><strong>${hasEndTime ? esc(fmtTime(endTime.toISOString())) : "Ukjent"}</strong><em>${hasEndTime ? esc(endTime.toLocaleDateString("nb-NO", { timeZone: OSLO })) : "Ikke oppgitt"}</em></div><div class="tunnelMetric closureCause"><span>Årsak</span><strong>${esc(closureMessage?.eventDescription || "Stengt vei")}</strong><em>Vegvesen</em></div>`
+      : segments.length === 2
+      ? segments.map(segment => {
+          const segmentSpeed = Number(segment?.currentSpeed);
+          const segmentTime = estimateTunnelTravelTime(tunnel.length, segmentSpeed);
+          const value = segment?.currentSpeed != null && Number.isFinite(segmentSpeed) ? `${Math.round(segmentSpeed)}<small> km/t</small>` : "–";
+          const time = segment.roadClosure ? "Stengningsvarsel" : Number.isFinite(segmentTime) ? `ca. ${fmtDurationSeconds(segmentTime)}` : "Ingen tidsdata";
+          return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong><em>${time}</em></div>`;
+        }).join("")
+      : `<div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
+         <div class="tunnelMetric"><span>Estimert kjøretid</span><strong>${Number.isFinite(travelTime) ? fmtDurationSeconds(travelTime) : "–"}</strong><em>hele tunnelen</em></div>`;
+
+    return `
+      <article class="tunnelItem ${statusClass}">
+        <div class="tunnelTopline">
+          <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
+          <h3 class="tunnelItemName">${tunnel.name}</h3>
+        </div>
+        <div class="tunnelIdentity">
+          <div class="tunnelIdentityRow">
+            <span class="tunnelItemLength">${(tunnel.length / 1000).toFixed(1)} km</span>
+            ${flowBadge ? `<span class="flowState ${flowMeta.className}"><i></i>${flowBadge}</span>` : ""}
+          </div>
+          ${lastClosed ? `<div class="tunnelNote">Sist stengt ${esc(lastClosed)}</div>` : ""}
+          ${staleNote ? `<div class="tunnelNote">${esc(staleNote)}</div>` : ""}
+          ${sourceLink ? `<div class="tunnelNote">${sourceLink}</div>` : ""}
+        </div>
+        <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">${metricsHtml}</div>
+        ${delayText || reason ? `<div class="tunnelBottomline">
+          ${delayText ? `<span class="delay ${flowMeta.className}">${delayText}</span>` : ""}
+          ${reason ? `<span class="tunnelReason">${esc(reason)}</span>` : ""}
+        </div>` : ""}
+      </article>`;
+  }
+
   function renderTunnelsGrid() {
     if (!dom.tunnelsGrid) return;
-    
-    const html = Object.entries(TUNNELS).map(([key, tunnel]) => {
-      const trafficFlow = normalizeTrafficFlow(STATE.tunnelTrafficFlow[key]);
-      const trafficMeta = getRealTrafficFlowDisplayMeta(trafficFlow);
-      const status = STATE.tunnelStatuses[key] || "ÅPEN";
-      const closureConflict = trafficFlow.roadClosure && status !== "STENGT";
-      const statusClass = !STATE.statusFresh ? "status-unknown" : closureConflict ? "status-warning" :
-        status === "ÅPEN" ? "status-open" :
-        status === "STENGT" ? "status-closed" : "status-warning";
-      
-      const statusText = !STATE.statusFresh ? "Ubekreftet" : closureConflict ? "Stengningsvarsel" :
-        status === "ÅPEN" ? "Åpen" :
-        status === "STENGT" ? "Stengt" : "Avvik";
-      
-      const tunnelMessages = (STATE.messagesByTunnel[key] || []).filter(isMessageActiveNow);
-      const closureMessage = tunnelMessages.find(isClosureMessage);
-      const reason = closureMessage ? closureMessage.versionTime ? `Endret ${fmtClosedTime(closureMessage.versionTime)}` : closureMessage.eventDescription || closureMessage.title : closureConflict ? "TomTom melder stengning. Ikke bekreftet av Vegvesen." : tunnelMessages.length > 0
-        ? ((closureMessage || tunnelMessages[0]).text || (closureMessage || tunnelMessages[0]).title)
-        : "Ingen aktive meldinger";
-      
-      const lengthText = tunnel.length > 0 ? `${(tunnel.length/1000).toFixed(1)} km` : "";
-      const speed = trafficFlow.currentSpeed == null ? null : Number(trafficFlow.currentSpeed);
-      const directionalSegments = trafficFlow.segments.slice(0, 2);
-      const directionalTimes = directionalSegments
-        .map(segment => estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed))
-        .filter(Number.isFinite);
-      const directionalDelays = directionalSegments
-        .map(segment => {
-          const current = estimateTunnelTravelTime(tunnel.length, segment?.currentSpeed);
-          const freeFlow = estimateTunnelTravelTime(tunnel.length, segment?.freeFlowSpeed);
-          return Number.isFinite(current) && Number.isFinite(freeFlow) ? Math.max(0, current - freeFlow) : null;
-        })
-        .filter(Number.isFinite);
-      const estimatedTravelTime = directionalTimes.length
-        ? Math.max(...directionalTimes)
-        : estimateTunnelTravelTime(tunnel.length, speed);
-      const freeFlowTravelTime = estimateTunnelTravelTime(
-        tunnel.length,
-        trafficFlow.freeFlowSpeed ?? tunnel.speedLimit
-      );
-      const delay = directionalDelays.length
-        ? Math.max(...directionalDelays)
-        : Number.isFinite(estimatedTravelTime) && Number.isFinite(freeFlowTravelTime)
-          ? Math.max(0, estimatedTravelTime - freeFlowTravelTime)
-          : null;
-      const hasFlow = directionalTimes.length > 0 || Number.isFinite(estimatedTravelTime);
-      const endTime = closureMessage?.overallEndTime ? new Date(closureMessage.overallEndTime) : null;
-      const hasEndTime = endTime && Number.isFinite(endTime.getTime());
-      const sourceLink = closureMessage?.situationId
-        ? `<a class="closureSource" href="https://www.vegvesen.no/trafikk/trafikkmeldinger/${encodeURIComponent(closureMessage.situationId)}" target="_blank" rel="noopener noreferrer">Melding hos Vegvesen</a>` : "";
-      const metricsHtml = status === "STENGT"
-        ? `<div class="tunnelMetric"><span>Forventet åpning</span><strong>${hasEndTime ? esc(fmtTime(endTime.toISOString())) : "Ukjent"}</strong><em>${hasEndTime ? esc(endTime.toLocaleDateString("nb-NO", { timeZone: "Europe/Oslo" })) : "Ikke oppgitt"}</em></div><div class="tunnelMetric closureCause"><span>Årsak</span><strong>${esc(closureMessage?.eventDescription || "Stengt vei")}</strong><em>Vegvesen</em></div>`
-        : directionalSegments.length === 2
-        ? directionalSegments.map(segment => {
-            const segmentSpeed = Number(segment?.currentSpeed);
-            const segmentTime = estimateTunnelTravelTime(tunnel.length, segmentSpeed);
-            const value = segment?.currentSpeed != null && Number.isFinite(segmentSpeed)
-              ? `${Math.round(segmentSpeed)}<small> km/t</small>`
-              : "–";
-            const time = segment.roadClosure ? "Stengningsvarsel" : Number.isFinite(segmentTime) ? `ca. ${fmtDurationSeconds(segmentTime)}` : "Ingen tidsdata";
-            return `<div class="tunnelMetric"><span>${esc(segment.segmentLabel || "Retning")}</span><strong>${value}</strong><em>${time}</em></div>`;
-          }).join("")
-        : `
-            <div class="tunnelMetric"><span>Målt fart</span><strong>${Number.isFinite(speed) ? `${Math.round(speed)}<small> km/t</small>` : "–"}</strong></div>
-            <div class="tunnelMetric"><span>Estimert kjøretid</span><strong>${Number.isFinite(estimatedTravelTime) ? fmtDurationSeconds(estimatedTravelTime) : "–"}</strong><em>hele tunnelen</em></div>`;
-
-      return `
-        <article class="tunnelItem ${statusClass}">
-          <div class="tunnelTopline">
-            <span class="statusBadge ${statusClass}"><i></i>${statusText}</span>
-            <h3 class="tunnelItemName">${tunnel.name}</h3>
-          </div>
-          <div class="tunnelIdentity">
-            <div class="tunnelIdentityRow">
-              <span class="tunnelItemLength">${lengthText}</span>
-              <span class="flowState ${trafficMeta.className}"><i></i>${status === "STENGT" ? "Vegvesen" : trafficFlow.roadClosure ? "TomTom-varsel" : trafficFlow.level === "UNKNOWN" ? "Ingen måling" : `${trafficMeta.level} trafikk`}</span>
-            </div>
-            <div class="measurementAge">${status === "STENGT" ? sourceLink : esc(formatMeasurementAge(trafficFlow))}</div>
-          </div>
-          <div class="tunnelMetrics ${hasFlow ? "" : "noFlow"}">
-            ${metricsHtml}
-          </div>
-          <div class="tunnelBottomline">
-            <span class="delay ${trafficMeta.className}">${status === "STENGT" ? STATE.statusFresh ? "Bekreftet stengt" : "Sist meldt stengt" : trafficFlow.roadClosure ? "Kontroller stengningsvarsel" : formatDelay(delay)}</span>
-            <span class="tunnelReason">${esc(reason)}</span>
-          </div>
-        </article>
-      `;
-    }).join("");
-    
-    dom.tunnelsGrid.innerHTML = html;
+    dom.tunnelsGrid.innerHTML = Object.entries(TUNNELS).map(([key, tunnel]) => renderTunnelCard(key, tunnel)).join("");
   }
 
   async function load() {
@@ -1062,10 +832,9 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
         timeZone: OSLO, weekday: "short", day: "numeric", month: "short"
       });
     }
-    const currentMinute = osloNow(now).minutes;
+    const currentMinute = Math.floor(now.getTime() / 60000);
     if (currentMinute !== _lastTickMinute) {
       _lastTickMinute = currentMinute;
-      renderRushHourBanner();
       if (STATE.lastSuccessfulUpdate) {
         if (Date.now() - STATE.lastSuccessfulUpdate.getTime() > 3 * 60 * 1000) STATE.statusFresh = false;
         renderTunnelsGrid();
@@ -1079,7 +848,6 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
   tick();
   setInterval(tick, CONFIG.clockRate);
   startProgressCountdown();
-  renderRushHourBanner();
   load();
   setInterval(load, CONFIG.refreshRate);
   loadWeather();
