@@ -60,7 +60,7 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 
 /* Tunnelkort: status og navn øverst, detaljer til venstre, målinger til høyre, avvik nederst */
 .tunnelsGrid{flex:1;min-height:0;padding:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(4,minmax(0,1fr));gap:8px}
-.tunnelItem{min-width:0;min-height:0;padding:11px 13px;display:grid;grid-template-columns:minmax(150px,.8fr) minmax(260px,1.2fr);grid-template-rows:auto 1fr auto;column-gap:10px;border:1px solid var(--line);border-left:4px solid var(--good);border-radius:6px;background:var(--surface-2);overflow:hidden}
+.tunnelItem{min-width:0;min-height:0;padding:11px 13px;display:grid;grid-template-columns:minmax(190px,.7fr) minmax(260px,1.3fr);grid-template-rows:auto 1fr auto;column-gap:14px;border:1px solid var(--line);border-left:4px solid var(--good);border-radius:6px;background:var(--surface-2);overflow:hidden}
 .tunnelItem.status-warning{border-left-color:var(--warn);background:var(--warn-soft)}
 .tunnelItem.status-closed{border-left-color:var(--bad);background:var(--bad-soft)}
 .tunnelItem.status-unknown{border-left-color:var(--faint)}
@@ -73,10 +73,10 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 .statusBadge i,.flowState i{width:6px;height:6px;border-radius:50%;background:currentColor}
 .tunnelItemName{min-width:0;overflow-wrap:anywhere;font-size:24px;line-height:1.05;font-weight:900}
 
-.tunnelIdentity{grid-column:1;grid-row:2;align-self:center;display:flex;flex-direction:column;gap:6px}
-.tunnelIdentityRow{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.tunnelItemLength{color:var(--muted);font:500 12px 'JetBrains Mono',monospace}
-.tunnelNote{color:var(--muted);font-size:12px;line-height:1.3}
+.tunnelIdentity{grid-column:1;grid-row:2;align-self:center;display:flex;flex-direction:column;gap:4px}
+.tunnelIdentityRow{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px}
+.tunnelItemLength{white-space:nowrap;color:var(--text);font:600 16px 'JetBrains Mono',monospace}
+.tunnelNote{color:var(--muted);font-size:14px;line-height:1.3}
 .flowState{padding:4px 7px;display:inline-flex;align-items:center;gap:6px;border-radius:4px;background:var(--good-soft);color:var(--good);font-size:13px;font-weight:800;text-transform:uppercase}
 .flowState.traffic-yellow{background:var(--warn-soft);color:var(--warn)}
 .flowState.traffic-red{background:var(--bad-soft);color:var(--bad)}
@@ -84,10 +84,10 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 .tunnelItem.status-warning .flowState{background:#0d1218}
 
 .tunnelMetrics{grid-column:2;grid-row:2;align-self:center;min-height:84px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--line);border-radius:5px;background:#0d1218}
-.tunnelMetric{min-width:0;padding:10px;border-right:1px solid var(--line)}
+.tunnelMetric{min-width:0;padding:8px 12px;border-right:1px solid var(--line)}
 .tunnelMetric:last-child{border-right:0}
-.tunnelMetric span{display:block;margin-bottom:5px;color:var(--faint);font-size:12px;line-height:1.2;font-weight:700;text-transform:uppercase}
-.tunnelMetric strong{display:block;font:700 22px 'JetBrains Mono',monospace;white-space:nowrap}
+.tunnelMetric span{display:block;margin-bottom:3px;color:var(--faint);font-size:12px;line-height:1.2;font-weight:700;text-transform:uppercase}
+.tunnelMetric strong{display:block;font:700 24px 'JetBrains Mono',monospace;white-space:nowrap}
 .tunnelMetric small{color:var(--muted);font-size:13px;font-weight:500}
 .tunnelMetric em{display:block;margin-top:3px;color:var(--muted);font:500 13px 'JetBrains Mono',monospace;font-style:normal;overflow-wrap:anywhere}
 .closureCause strong{font:700 16px 'DM Sans',sans-serif;white-space:normal;overflow-wrap:anywhere}
@@ -177,6 +177,9 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
   .tunnelsGrid{grid-template-rows:none}
   .tunnelItem{display:flex;flex-direction:column;gap:8px;padding:10px}
   .tunnelItemName{font-size:22px}
+  .tunnelItemLength{font-size:14px}
+  .tunnelNote{font-size:13px}
+  .tunnelMetric strong{font-size:22px}
   .tunnelIdentity,.tunnelMetrics{align-self:stretch}
   .tunnelBottomline{margin-top:auto;padding-top:0}
   .messagesCard{position:sticky;top:10px;height:720px}
@@ -185,9 +188,9 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
   .overviewTitle{font-size:23px}
 }
 @media(min-width:1520px) and (max-width:1750px){
-  .tunnelItem{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(210px,1.2fr);gap:5px 8px}
+  .tunnelItem{display:grid;grid-template-columns:minmax(130px,.6fr) minmax(210px,1.4fr);gap:5px 8px}
   .tunnelIdentity,.tunnelMetrics{align-self:center}
-  .tunnelMetric strong{font-size:21px}
+  .tunnelMetric strong{font-size:22px}
   .tunnelReason{min-width:140px}
 }
 @media(max-width:1100px){
