@@ -158,6 +158,46 @@ body{color:var(--text);background:var(--bg);font-family:'DM Sans',ui-sans-serif,
 /* Infoskjerm (bred og høy nok): alt på én skjerm, lange meldinger kortes ned */
 @media(min-width:1751px){
   .tunnelReason{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+  /* Større tekst som kan leses på avstand */
+  .brandText .title{font-size:26px}
+  .brandText .sub{font-size:15px}
+  .chip{height:40px;padding:0 14px;font-size:16px}
+  .weatherIcon{font-size:19px}
+  .weatherWind{font-size:14px}
+  .overviewSignal{font-size:14px}
+  .overviewTitle{font-size:29px}
+  .overviewSub{font-size:16px}
+  .overviewMetricLabel{font-size:14px}
+  .overviewMetric strong{font-size:29px}
+  .overviewMetric>span:last-child{font-size:15px}
+  .h2{font-size:24px}
+  .sectionSub,.legend,.hint{font-size:15px}
+  .legendDot,.liveDot{width:8px;height:8px}
+  .tunnelsGrid{padding:8px;gap:6px}
+  .tunnelItem{padding:8px 13px}
+  .tunnelIdentity{gap:2px}
+  .tunnelNote{line-height:1.2}
+  .tunnelBottomline{padding-top:2px}
+  .tunnelReason{line-height:1.25}
+  .statusBadge{font-size:18px}
+  .tunnelItemName{font-size:28px}
+  .tunnelItemLength{font-size:19px}
+  .tunnelNote{font-size:16px}
+  .flowState,.delay,.tunnelReason{font-size:15px}
+  .tunnelMetrics{min-height:0}
+  .tunnelMetric{padding:6px 12px}
+  .tunnelMetric span{margin-bottom:1px;font-size:14px}
+  .tunnelMetric strong{font-size:29px;line-height:1.1}
+  .tunnelMetric em{margin-top:1px}
+  .tunnelMetric small{font-size:15px}
+  .tunnelMetric em{font-size:15px}
+  .tunnelItem.status-closed{grid-template-columns:minmax(150px,.45fr) minmax(0,1.55fr)}
+  .closureCause strong{font-size:17px;line-height:1.2;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+  .closureCause em{display:none}
+  .closureSource{font-size:15px}
+  .staticCamCaption{font-size:16px}
+  .cameraExpand{font-size:14px}
+  .foot{font-size:15px}
 }
 /* Bred, men lav skjerm: rull i stedet for å klippe kortene */
 @media(min-width:1751px) and (max-height:1039px){

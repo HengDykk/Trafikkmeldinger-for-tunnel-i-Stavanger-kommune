@@ -657,10 +657,11 @@ import { isClosureMessage, isPartialClosure, measurementAge } from "./traffic-ru
 
     // Rolige kort viser bare status og måling; merker og notater kommer når noe avviker.
     const flowBadge = closed ? "" : flow.roadClosure ? "TomTom-varsel" : flow.level === "UNKNOWN" ? "Ingen måling" : flow.level === "GREEN" ? "" : `${flowMeta.level} trafikk`;
-    const lastClosed = closed ? "" : fmtDate(STATE.lastClosedAtByTunnel[key]);
     const sourceLink = closed && closureMessage?.situationId
       ? `<a class="closureSource" href="https://www.vegvesen.no/trafikk/trafikkmeldinger/${encodeURIComponent(closureMessage.situationId)}" target="_blank" rel="noopener noreferrer">Melding hos Vegvesen</a>` : "";
     const staleNote = closed ? "" : staleMeasurementNote(flow);
+    // «Sist stengt» vises bare på rolige kort, så avvik får plassen.
+    const lastClosed = closed || flowBadge || staleNote ? "" : fmtDate(STATE.lastClosedAtByTunnel[key]);
 
     const endTime = closureMessage?.overallEndTime ? new Date(closureMessage.overallEndTime) : null;
     const hasEndTime = endTime && Number.isFinite(endTime.getTime());
